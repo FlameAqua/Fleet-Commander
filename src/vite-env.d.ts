@@ -13,7 +13,7 @@ interface FleetElectronBridge {
   send: (channel: string, data?: unknown) => void
   on: (channel: string, func: (...args: unknown[]) => void) => void
   backendUrl: string
-  setTitleBarOverlay?: (opts: { color: string; symbolColor: string; height: number }) => void
+  windowControl?: (action: 'minimize' | 'maximize' | 'close') => void
 }
 
 interface Window {

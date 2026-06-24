@@ -28,15 +28,13 @@ import {
 import { usePrompt } from './components/PromptProvider'
 import { Splash } from './components/Splash'
 import { Stars } from './components/Stars'
+import { Aurora } from './components/Aurora'
 import { Clouds } from './components/Clouds'
 import { Waves } from './components/Waves'
+import { WindowControls } from './components/WindowControls'
 import './App.css'
 
 type Theme = 'night' | 'day'
-const OVERLAY: Record<Theme, { color: string; symbolColor: string; height: number }> = {
-  night: { color: '#16171d', symbolColor: '#c7ccd6', height: 44 },
-  day: { color: '#eef4fc', symbolColor: '#28344c', height: 44 },
-}
 
 type Health = 'checking' | 'ok' | 'down'
 type Step = 'source' | 'action'
@@ -97,7 +95,6 @@ function App() {
     } catch {
       /* ignore */
     }
-    window.electron?.setTitleBarOverlay?.(OVERLAY[theme])
   }, [theme])
 
   useEffect(() => {
@@ -355,7 +352,14 @@ function App() {
   return (
     <div className="app">
       <Splash ready={health === 'ok'} />
-      {theme === 'night' ? <Stars /> : <Clouds />}
+      {theme === 'night' ? (
+        <>
+          <Aurora />
+          <Stars />
+        </>
+      ) : (
+        <Clouds />
+      )}
       <Waves />
 
       <header className="app__bar">
@@ -366,10 +370,12 @@ function App() {
             type="button"
             className="app__theme"
             onClick={() => setTheme((t) => (t === 'night' ? 'day' : 'night'))}
-            title="Toggle Day / Night"
+            title={theme === 'night' ? 'Switch to Day Mode' : 'Switch to Night Mode'}
+            aria-label="Toggle Day / Night"
           >
-            {theme === 'night' ? '☀ Day Mode' : '🌙 Night Mode'}
+            {theme === 'night' ? '☀' : '☾'}
           </button>
+          <WindowControls />
         </div>
       </header>
 

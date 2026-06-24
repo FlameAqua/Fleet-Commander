@@ -1,7 +1,10 @@
+/* All selectors are scoped under .se so the editor stays self-contained and
+   isn't overridden by broad parent rules (e.g. `.scripts button`) when it's
+   embedded inside the script library. */
 .se {
   position: relative;
 }
-.se__ta {
+.se .se__ta {
   width: 100%;
   min-height: 240px;
   resize: vertical;
@@ -16,13 +19,14 @@
   box-sizing: border-box;
   tab-size: 2;
 }
-.se__help {
+.se .se__help {
   position: absolute;
   top: 8px;
   right: 12px;
   z-index: 3;
   width: 20px;
   height: 20px;
+  padding: 0;
   border-radius: 50%;
   border: 1px solid var(--border);
   background: var(--panel);
@@ -34,11 +38,11 @@
   align-items: center;
   justify-content: center;
 }
-.se__help:hover {
+.se .se__help:hover {
   color: var(--accent);
   border-color: var(--accent);
 }
-.se__menu {
+.se .se__menu {
   position: absolute;
   z-index: 5;
   list-style: none;
@@ -52,7 +56,10 @@
   border-radius: 8px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
 }
-.se__menu button {
+.se .se__menu li {
+  border: none;
+}
+.se .se__menu button {
   width: 100%;
   text-align: left;
   border: none;
@@ -64,6 +71,6 @@
   border-radius: 5px;
   cursor: pointer;
 }
-.se__menu button:hover {
+.se .se__menu button:hover {
   background: rgba(142, 162, 255, 0.16);
 }

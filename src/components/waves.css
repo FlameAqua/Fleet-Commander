@@ -46,15 +46,38 @@
   }
 }
 
-/* Occasional sailing ship */
+/* Occasional sailing ship — light at night, darker for the day sky. */
+.ship__mast {
+  stroke: rgba(214, 226, 255, 0.7);
+}
+.ship__sail {
+  fill: rgba(214, 226, 255, 0.55);
+}
+.ship__sail2 {
+  fill: rgba(214, 226, 255, 0.35);
+}
+.ship__hull {
+  fill: rgba(120, 150, 220, 0.78);
+}
+:root[data-theme='day'] .ship__mast {
+  stroke: rgba(36, 58, 110, 0.85);
+}
+:root[data-theme='day'] .ship__sail {
+  fill: rgba(58, 92, 165, 0.92);
+}
+:root[data-theme='day'] .ship__sail2 {
+  fill: rgba(82, 112, 185, 0.78);
+}
+:root[data-theme='day'] .ship__hull {
+  fill: rgba(34, 60, 125, 0.95);
+}
+
 .ship {
   position: absolute;
-  bottom: 40px;
+  bottom: 24px; /* sit low enough to stay on the water at every wave phase */
   left: 0;
   width: 44px;
   height: 30px;
-  transform: translateX(-12vw);
-  animation: fc-ship-sail 52s linear infinite;
   will-change: transform;
   z-index: 1;
 }
@@ -62,9 +85,27 @@
   width: 100%;
   height: 100%;
   transform-origin: 50% 80%;
+}
+
+/* Left → right ship */
+.ship--a {
+  bottom: 22px;
+  animation: fc-ship-ltr 52s linear infinite;
+}
+.ship--a .ship__bob {
   animation: fc-ship-bob 4.5s ease-in-out infinite;
 }
-@keyframes fc-ship-sail {
+/* Right → left ship — flipped to face its direction, different cadence */
+.ship--b {
+  bottom: 27px;
+  animation: fc-ship-rtl 71s linear infinite;
+  animation-delay: -34s;
+}
+.ship--b .ship__bob {
+  animation: fc-ship-bob-flip 5.2s ease-in-out infinite;
+}
+
+@keyframes fc-ship-ltr {
   0% {
     transform: translateX(-12vw);
   }
@@ -73,6 +114,17 @@
   }
   100% {
     transform: translateX(112vw);
+  }
+}
+@keyframes fc-ship-rtl {
+  0% {
+    transform: translateX(112vw);
+  }
+  48% {
+    transform: translateX(-14vw);
+  }
+  100% {
+    transform: translateX(-14vw);
   }
 }
 @keyframes fc-ship-bob {
@@ -84,6 +136,15 @@
     transform: translateY(-2px) rotate(2.5deg);
   }
 }
+@keyframes fc-ship-bob-flip {
+  0%,
+  100% {
+    transform: scaleX(-1) translateY(0) rotate(-2.5deg);
+  }
+  50% {
+    transform: scaleX(-1) translateY(-2px) rotate(2.5deg);
+  }
+}
 
 @media (prefers-reduced-motion: reduce) {
   .waves__parallax > use {
@@ -91,7 +152,7 @@
   }
   .ship {
     animation: none;
-    transform: translateX(-30vw);
+    transform: translateX(-40vw);
   }
   .ship__bob {
     animation: none;

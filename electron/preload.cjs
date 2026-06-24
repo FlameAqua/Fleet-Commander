@@ -9,6 +9,6 @@ contextBridge.exposeInMainWorld('electron', {
   on: (channel, func) =>
     ipcRenderer.on(channel, (_event, ...args) => func(...args)),
   backendUrl: 'http://127.0.0.1:8765',
-  // Recolor the native title-bar overlay (Day/Night) — no-op outside Electron.
-  setTitleBarOverlay: (opts) => ipcRenderer.send('fc:set-overlay', opts),
+  // Frameless window controls (minimize / maximize / close).
+  windowControl: (action) => ipcRenderer.send('fc:win', action),
 })

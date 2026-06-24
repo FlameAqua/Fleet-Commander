@@ -1,12 +1,14 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { usePrompt } from '../../components/PromptProvider'
 import {
   ApiError,
   decryptCsv,
   decryptServerCsv,
-  encryptCsv,
+  encryptCsvToFolder,
   getServerCsv,
   listCsvFiles,
+  openCsvFolder,
   type CsvFileInfo,
 } from '../../api'
 import { buildCanonicalKeepass, type HostEntry } from '../../lib/csv'
@@ -35,6 +37,9 @@ interface Props {
 function errMsg(err: unknown): string {
   return err instanceof ApiError ? err.message : err instanceof Error ? err.message : String(err)
 }
+
+type NoticeKind = 'error' | 'ok'
+type Notify = (text: string | null, kind?: NoticeKind) => void
 
 export function SourcePanel({ source, onChange, onModeChange, testHost }: Props) {
   return (
@@ -73,23 +78,50 @@ function CompoundEditor({
   source: CompoundSource
   onChange: (s: SourceState) => void
 }) {
-  const [notice, setNotice] = useState<string | null>(null)
+  const [notice, setNotice] = useState<{ text: string; kind: NoticeKind } | null>(null)
   const [showMapping, setShowMapping] = useState(false)
   const [serverFiles, setServerFiles] = useState<CsvFileInfo[]>([])
   const prompt = usePrompt()
 
-  useEffect(() => {
-    let cancelled = false
-    listCsvFiles()
-      .then((r) => !cancelled && setServerFiles(r.files))
-      .catch(() => {})
-    return () => {
-      cancelled = true
+  const notify: Notify = (text, kind = 'error') => setNotice(text ? { text, kind } : null)
+
+  const refreshServerFiles = useCallback(async () => {
+    try {
+      const r = await listCsvFiles()
+      setServerFiles(r.files)
+    } catch {
+      /* the folder may not exist yet — leave the list empty */
     }
   }, [])
 
+  useEffect(() => {
+    void refreshServerFiles()
+  }, [refreshServerFiles])
+
+  /** After importing a raw CSV, offer to keep an encrypted copy in the folder. */
+  async function offerEncryptToFolder(file: File) {
+    const pw = await prompt({
+      title: 'Encrypt for future use?',
+      message: `Save an encrypted copy of "${file.name}" to your CSV folder so you can reuse it later? Enter a master password, or cancel to skip.`,
+      password: true,
+      confirmLabel: 'Encrypt & save',
+    })
+    if (pw === null) return // skipped — keep using the loaded plaintext
+    if (!pw) {
+      notify('Master password is required to encrypt.')
+      return
+    }
+    try {
+      const { filename } = await encryptCsvToFolder(file, pw)
+      await refreshServerFiles()
+      notify(`Saved encrypted copy "${filename}" to your CSV folder.`, 'ok')
+    } catch (e) {
+      notify(errMsg(e))
+    }
+  }
+
   async function loadServerFile(name: string) {
-    setNotice(null)
+    notify(null)
     const info = serverFiles.find((f) => f.name === name)
     if (!info) return
     try {
@@ -108,7 +140,7 @@ function CompoundEditor({
         onChange({ ...source, file: { name: filename, text: csv, fromEncrypted: false }, excluded: [] })
       }
     } catch (e) {
-      setNotice(errMsg(e))
+      notify(errMsg(e))
     }
   }
 
@@ -129,7 +161,7 @@ function CompoundEditor({
   }, [source.file, source.overrides, source.useLogin])
 
   async function onFile(file: File | null) {
-    setNotice(null)
+    notify(null)
     if (!file) {
       onChange({ ...source, file: null, excluded: [] })
       return
@@ -147,15 +179,17 @@ function CompoundEditor({
         const { csv, filename } = await decryptCsv(file, pw)
         onChange({ ...source, file: { name: filename, text: csv, fromEncrypted: true }, excluded: [] })
       } catch (e) {
-        setNotice(errMsg(e))
+        notify(errMsg(e))
       }
       return
     }
     try {
       const text = await readFileText(file)
       onChange({ ...source, file: { name: file.name, text, fromEncrypted: false }, excluded: [] })
+      // A raw plaintext CSV — offer to keep an encrypted copy for next time.
+      await offerEncryptToFolder(file)
     } catch (e) {
-      setNotice(errMsg(e))
+      notify(errMsg(e))
     }
   }
 
@@ -166,7 +200,7 @@ function CompoundEditor({
       if (!window.confirm('Remove the loaded plaintext CSV (clears its passwords from the app)?')) return
     }
     onChange({ ...source, file: null })
-    setNotice(null)
+    notify(null)
   }
 
   return (
@@ -213,7 +247,7 @@ function CompoundEditor({
             ✕
           </button>
         )}
-        <EncryptControl onNotice={setNotice} />
+        <CsvToolsMenu onNotice={notify} onChanged={refreshServerFiles} />
       </div>
 
       <button type="button" className="src-link" onClick={() => setShowMapping((v) => !v)}>
@@ -258,7 +292,9 @@ function CompoundEditor({
         </div>
       )}
 
-      {notice && <div className="src-notice src-notice--error">{notice}</div>}
+      {notice && (
+        <div className={`src-notice src-notice--${notice.kind}`}>{notice.text}</div>
+      )}
 
       {preview && !preview.ok && <div className="src-notice src-notice--error">{preview.error}</div>}
       {preview && preview.ok && (
@@ -300,19 +336,43 @@ function ColInput({
 }
 
 // --------------------------------------------------------------------------
-// Decrypt (.enc → CSV) + Encrypt utility
+// CSV tools cog — encrypt / decrypt / open the CSV library folder
 // --------------------------------------------------------------------------
-/** Utility: encrypt a plaintext CSV into the `.enc` format and download it. */
-function EncryptControl({ onNotice }: { onNotice: (msg: string | null) => void }) {
+function CsvToolsMenu({ onNotice, onChanged }: { onNotice: Notify; onChanged: () => Promise<void> }) {
+  const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [pos, setPos] = useState<{ top: number; right: number } | null>(null)
   const prompt = usePrompt()
+  const cog = useRef<HTMLButtonElement>(null)
+  const encInput = useRef<HTMLInputElement>(null)
+  const decInput = useRef<HTMLInputElement>(null)
 
-  async function encrypt(file: File) {
+  function openMenu() {
+    const r = cog.current?.getBoundingClientRect()
+    if (r) setPos({ top: r.bottom + 4, right: Math.max(8, window.innerWidth - r.right) })
+    setOpen(true)
+  }
+
+  // The menu is portaled to <body>; close it on scroll/resize so it never
+  // floats out of place relative to the cog.
+  useEffect(() => {
+    if (!open) return
+    const close = () => setOpen(false)
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('resize', close)
+    return () => {
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('resize', close)
+    }
+  }, [open])
+
+  // Encrypt a chosen plaintext CSV and save the .enc into the library folder.
+  async function encryptPick(file: File) {
     const pw = await prompt({
-      title: 'Encrypt CSV',
-      message: `Set a master password to encrypt ${file.name}:`,
+      title: 'Encrypt a CSV',
+      message: `Set a master password to encrypt "${file.name}" and save it to your CSV folder:`,
       password: true,
-      confirmLabel: 'Encrypt',
+      confirmLabel: 'Encrypt & save',
     })
     if (pw === null) return
     if (!pw) {
@@ -322,8 +382,9 @@ function EncryptControl({ onNotice }: { onNotice: (msg: string | null) => void }
     setBusy(true)
     onNotice(null)
     try {
-      const { blob, filename } = await encryptCsv(file, pw)
-      downloadBlob(blob, filename)
+      const { filename } = await encryptCsvToFolder(file, pw)
+      await onChanged()
+      onNotice(`Encrypted and saved "${filename}" to your CSV folder.`, 'ok')
     } catch (e) {
       onNotice(errMsg(e))
     } finally {
@@ -331,21 +392,96 @@ function EncryptControl({ onNotice }: { onNotice: (msg: string | null) => void }
     }
   }
 
+  // Decrypt a chosen .enc and download the plaintext CSV.
+  async function decryptPick(file: File) {
+    const pw = await prompt({
+      title: 'Decrypt a CSV',
+      message: `Enter the master password for "${file.name}":`,
+      password: true,
+      confirmLabel: 'Decrypt',
+    })
+    if (pw === null) return
+    if (!pw) {
+      onNotice('Master password is required.')
+      return
+    }
+    setBusy(true)
+    onNotice(null)
+    try {
+      const { csv, filename } = await decryptCsv(file, pw)
+      const base = (filename || file.name).replace(/\.enc$/i, '').replace(/\.csv$/i, '')
+      downloadBlob(new Blob([csv], { type: 'text/csv' }), `${base}.csv`)
+      onNotice(`Decrypted "${file.name}" — downloaded ${base}.csv.`, 'ok')
+    } catch (e) {
+      onNotice(errMsg(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function openFolder() {
+    setOpen(false)
+    try {
+      await openCsvFolder()
+    } catch (e) {
+      onNotice(errMsg(e))
+    }
+  }
+
   return (
-    <span className="src-encdec">
-      <label className="src-link" aria-disabled={busy}>
-        <input
-          type="file"
-          accept=".csv,text/csv"
-          hidden
-          onChange={(e) => {
-            const f = e.target.files?.[0]
-            if (f) void encrypt(f)
-            e.target.value = ''
-          }}
-        />
-        Encrypt a CSV…
-      </label>
+    <span className="src-tools">
+      <button
+        ref={cog}
+        type="button"
+        className="src-cog"
+        title="CSV tools"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        disabled={busy}
+        onClick={() => (open ? setOpen(false) : openMenu())}
+      >
+        ⚙
+      </button>
+      {open && pos &&
+        createPortal(
+          <>
+            <div className="src-tools__backdrop" onClick={() => setOpen(false)} />
+            <div className="src-tools__menu" role="menu" style={{ top: pos.top, right: pos.right }}>
+              <button type="button" role="menuitem" onClick={() => { setOpen(false); encInput.current?.click() }}>
+                Encrypt a CSV…
+              </button>
+              <button type="button" role="menuitem" onClick={() => { setOpen(false); decInput.current?.click() }}>
+                Decrypt a CSV…
+              </button>
+              <button type="button" role="menuitem" onClick={openFolder}>
+                Open CSV folder
+              </button>
+            </div>
+          </>,
+          document.body,
+        )}
+      <input
+        ref={encInput}
+        type="file"
+        accept=".csv,text/csv"
+        hidden
+        onChange={(e) => {
+          const f = e.target.files?.[0]
+          e.target.value = ''
+          if (f) void encryptPick(f)
+        }}
+      />
+      <input
+        ref={decInput}
+        type="file"
+        accept=".enc"
+        hidden
+        onChange={(e) => {
+          const f = e.target.files?.[0]
+          e.target.value = ''
+          if (f) void decryptPick(f)
+        }}
+      />
     </span>
   )
 }
@@ -418,9 +554,8 @@ function ManualEditor({
 function TestEditor({ testHost }: { testHost: string | null }) {
   return (
     <div className="src-pane">
-      <p>Runs against the single safe test target:</p>
+      <p className="src-hint">Run actions on the test phone system (Debian) only:</p>
       <code className="src-testhost">{testHost ?? '(loading…)'}</code>
-      <p className="src-hint">You'll be prompted for the host password when you start a run.</p>
     </div>
   )
 }

@@ -30,6 +30,22 @@ const DESTRUCTIVE_PATTERNS: { re: RegExp; label: string }[] = [
   { re: /\biptables\s+-F\b/i, label: 'flush firewall rules' },
 ]
 
+// Commands/redirects that change state — if none of these (and nothing
+// destructive) appear, we treat a custom script as read-only.
+const MUTATING_PATTERNS: RegExp[] = [
+  /\b(cp|mv|rm|rmdir|mkdir|touch|ln|chmod|chown|chgrp|tee|install|truncate|patch)\b/i,
+  /\bsed\b[^\n]*-i/i,
+  /\b(apt|apt-get|aptitude|dpkg|yum|dnf|rpm|zypper|pacman|snap|pip|pip3|npm|gem|cargo)\s+(install|remove|update|upgrade|purge|add|uninstall)\b/i,
+  /\b(systemctl|service|rc-service)\s+(start|stop|restart|reload|enable|disable|mask)\b/i,
+  /\b(useradd|adduser|usermod|userdel|deluser|passwd|groupadd|groupdel)\b/i,
+  /\bcrontab\b/i,
+  /\b(iptables|nft|ufw|firewall-cmd)\b/i,
+  /\bgit\s+(push|commit|reset|clean|checkout|merge|rebase)\b/i,
+  /\b(kill|killall|pkill)\b/i,
+  // redirect to a real file (not >/dev/null, not 2>&1)
+  />>?\s*(?!&)(?!\/dev\/(null|stdout|stderr)\b)[\w./~$-]+/,
+]
+
 function scriptContent(cs: CustomScriptState): string {
   return cs.source === 'library' ? cs.library.content : cs.source === 'paste' ? cs.paste : cs.upload.content
 }
@@ -48,12 +64,16 @@ export function assessRisk(action: ActionId, threecx: ThreecxState, customScript
     case 'custom_script': {
       const content = scriptContent(customScript)
       const hits = DESTRUCTIVE_PATTERNS.filter((p) => p.re.test(content)).map((p) => `⚠ ${p.label}`)
-      const details: string[] = [...hits]
-      if (customScript.rootMode !== 'none') details.push('Runs as root via su escalation.')
+      const root = customScript.rootMode !== 'none'
       if (hits.length) {
+        const details = [...hits]
+        if (root) details.push('Runs as root via su escalation.')
         return { level: 'destructive', title: 'Custom script', summary: 'This script contains commands that can be destructive. Review it carefully before running.', details }
       }
-      return { level: 'modifies', title: 'Custom script', summary: 'Runs your script on each system — its effect depends on the script.', details }
+      if (!MUTATING_PATTERNS.some((re) => re.test(content))) {
+        return { level: 'read-only', title: 'Custom script', summary: 'This script looks read-only — no file writes or system-changing commands were detected.', details: [] }
+      }
+      return { level: 'modifies', title: 'Custom script', summary: 'Runs your script on each system — it writes files or changes system state.', details: root ? ['Runs as root via su escalation.'] : [] }
     }
 
     case 'threecx': {

@@ -20,6 +20,9 @@
   --code-bg: #1f2028;
   --accent: #8ea2ff;
   --sky: radial-gradient(circle at 50% 8%, #1c2740 0%, #14151c 60%);
+  --error-bg: #3b1414;
+  --error-text: #ffb4b4;
+  --error-border: rgba(224, 86, 79, 0.5);
 }
 
 /* Day — bright sky, dark readable text, clouds instead of stars. */
@@ -33,7 +36,10 @@
   --border: #cfdcec;
   --code-bg: #e2ecf8;
   --accent: #3b6fd6;
-  --sky: linear-gradient(180deg, #bfe0ff 0%, #e7f2fd 55%, #eef4fc 100%);
+  --sky: linear-gradient(180deg, #a8d2ff 0%, #d2e7fc 55%, #e4f0fc 100%);
+  --error-bg: #fdeceb;
+  --error-text: #b3261e;
+  --error-border: rgba(180, 38, 30, 0.35);
 }
 
 * {

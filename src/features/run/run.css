@@ -360,9 +360,10 @@
   border-radius: 7px;
 }
 .results__outcome--success {
-  color: #9be39b;
-  background: rgba(70, 196, 106, 0.14);
-  border: 1px solid rgba(70, 196, 106, 0.4);
+  color: #7bb588;
+  font-weight: 500;
+  background: rgba(70, 196, 106, 0.08);
+  border: 1px solid rgba(70, 196, 106, 0.28);
 }
 .results__outcome--failure {
   color: #e7c47a;
@@ -370,9 +371,9 @@
   border: 1px solid rgba(214, 169, 58, 0.45);
 }
 .results__outcome--error {
-  color: #ffb4b4;
-  background: #3b1414;
-  border: 1px solid rgba(224, 86, 79, 0.5);
+  color: var(--error-text);
+  background: var(--error-bg);
+  border: 1px solid var(--error-border);
 }
 
 .results__cards {

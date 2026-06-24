@@ -18,6 +18,8 @@ import json
 import os
 import queue as _queue_mod
 import re
+import subprocess
+import sys
 import threading
 import time
 import webbrowser
@@ -535,6 +537,19 @@ def encrypt_csv_endpoint():
     safe_base = re.sub(r"[^A-Za-z0-9._-]+", "_", base).strip("._-") or "fleet"
     filename = safe_base + ".enc"
 
+    # When `save=true`, write the .enc straight into the CSV library folder
+    # (the data-dir csv/ folder) so it shows up in "Import from csv folder…"
+    # for future use, instead of being returned as a one-off download.
+    if request.form.get("save", "").lower() in ("1", "true", "yes"):
+        d = bsm_paths.default_csv_dir()
+        try:
+            os.makedirs(d, exist_ok=True)
+            with open(os.path.join(d, filename), "wb") as f:
+                f.write(blob)
+        except OSError as e:
+            return jsonify({"ok": False, "error": f"Couldn't save to CSV folder: {e}"}), 500
+        return jsonify({"ok": True, "filename": filename, "dir": d})
+
     return Response(
         blob,
         mimetype="application/octet-stream",
@@ -687,6 +702,27 @@ def get_csv_file(name):
     except UnicodeDecodeError:
         text = raw.decode("latin-1")
     return jsonify({"ok": True, "csv": text, "filename": safe})
+
+
+@app.route("/api/open-csv-folder", methods=["POST"])
+def open_csv_folder():
+    """
+    Open the CSV library folder in the operator's file manager. Safe because
+    the app binds 127.0.0.1 — the "server" is the operator's own machine, so
+    the Explorer/Finder window appears on their desktop.
+    """
+    d = bsm_paths.default_csv_dir()
+    try:
+        os.makedirs(d, exist_ok=True)
+        if sys.platform.startswith("win"):
+            os.startfile(d)  # noqa: S606 — local desktop, trusted path
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", d])
+        else:
+            subprocess.Popen(["xdg-open", d])
+    except Exception as e:  # noqa: BLE001
+        return jsonify({"ok": False, "error": f"Couldn't open the folder: {e}"}), 500
+    return jsonify({"ok": True, "dir": d})
 
 
 @app.route("/")

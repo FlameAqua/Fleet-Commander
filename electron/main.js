@@ -160,7 +160,20 @@ function createWindow () {
   mainWindow.loadURL(isDev ? VITE_DEV_SERVER_URL : BACKEND_URL)
   if (isDev) mainWindow.webContents.openDevTools({ mode: 'detach' })
 
-  mainWindow.once('ready-to-show', () => mainWindow.show())
+  // Reveal the window reliably. `ready-to-show` is the ideal trigger, but on
+  // some setups it fires late or not at all (frameless window, slow first
+  // paint) — which would leave the window invisible. Back it up with
+  // did-finish-load and a hard timeout so the window never stays hidden.
+  let shown = false
+  const reveal = () => {
+    if (shown || !mainWindow) return
+    shown = true
+    mainWindow.show()
+    mainWindow.focus()
+  }
+  mainWindow.once('ready-to-show', reveal)
+  mainWindow.webContents.once('did-finish-load', reveal)
+  setTimeout(reveal, 4000)
   mainWindow.on('closed', () => { mainWindow = null })
 }
 
@@ -195,13 +208,13 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 
-// Renderer asks to recolor the title-bar overlay when the theme changes.
-ipcMain.on('fc:set-overlay', (e, opts) => {
-  try {
-    BrowserWindow.fromWebContents(e.sender)?.setTitleBarOverlay(opts)
-  } catch {
-    /* not on a platform that supports the overlay — ignore */
-  }
+// Custom (DOM-drawn) window controls for the frameless window.
+ipcMain.on('fc:win', (e, action) => {
+  const win = BrowserWindow.fromWebContents(e.sender)
+  if (!win) return
+  if (action === 'minimize') win.minimize()
+  else if (action === 'maximize') win.isMaximized() ? win.unmaximize() : win.maximize()
+  else if (action === 'close') win.close()
 })
 
 app.on('before-quit', stopBackend)

@@ -178,3 +178,24 @@ export async function encryptCsv(
   const filename = m ? m[1] : 'fleet.enc'
   return { blob: await res.blob(), filename }
 }
+
+/** Encrypt a plaintext CSV and save the `.enc` straight into the CSV library folder. */
+export async function encryptCsvToFolder(
+  file: File,
+  masterPassword: string,
+): Promise<{ filename: string; dir: string }> {
+  const fd = new FormData()
+  fd.append('csv_file', file)
+  fd.append('master_password', masterPassword)
+  fd.append('save', 'true')
+  return parseJson<{ ok: true; filename: string; dir: string }>(
+    await fetch(apiUrl('/api/encrypt-csv'), { method: 'POST', body: fd }),
+  )
+}
+
+/** Open the CSV library folder in the OS file manager (local desktop). */
+export async function openCsvFolder(): Promise<{ dir: string }> {
+  return parseJson<{ ok: true; dir: string }>(
+    await fetch(apiUrl('/api/open-csv-folder'), { method: 'POST' }),
+  )
+}

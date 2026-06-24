@@ -272,7 +272,7 @@ export function buildCanonicalKeepass(text: string, opts: BuildCompoundOptions =
     entries.push({ label, name: acct.trim() || label, url, csvLine })
   }
   if (!entries.length)
-    throw new Error('No usable host rows found. Each row needs a non-empty URL column.')
+    throw new Error('No usable host rows found. Ensure you have valid SSH URLs in your URL column.')
 
   return {
     entries,

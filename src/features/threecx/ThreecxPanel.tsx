@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Segmented } from '../../components/Segmented'
 import { readFileText } from '../../lib/file'
 import { catalogFor, TCX_ENDPOINTS, type CatalogField } from './catalogs'
@@ -205,8 +206,10 @@ export function ThreecxPanel({ value, onChange, onProbe, onQuickAction }: Props)
         </>
       )}
 
-      {/* Advanced Settings — opened via the ⚙ cogwheel. PBX credentials. */}
-      {showAdvanced && (
+      {/* Advanced Settings — opened via the ⚙ cogwheel. PBX credentials.
+          Portaled to <body> so the overlay covers the whole viewport instead
+          of being trapped inside the frosted (backdrop-filter) step card. */}
+      {showAdvanced && createPortal(
         <div className="tcx-modal__overlay" onMouseDown={() => setShowAdvanced(false)}>
           <div className="tcx-modal" onMouseDown={(e) => e.stopPropagation()}>
             <div className="tcx-modal__head">
@@ -247,7 +250,8 @@ export function ThreecxPanel({ value, onChange, onProbe, onQuickAction }: Props)
               )}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   )
@@ -423,18 +427,6 @@ function PanelEditor({
         </button>
       </header>
 
-      {open && !panel.singleton && (
-        <label className="tcx-panel__filter">
-          <span>Apply only to items:</span>
-          <input
-            value={panel.itemFilter}
-            onChange={(e) => onChange({ ...panel, itemFilter: e.target.value })}
-            placeholder="2001-2005, 20*  (default blank = all)"
-            spellCheck={false}
-          />
-        </label>
-      )}
-
       {open && visible.length > 0 && (
         <div className="tcx-panel__fields">
           {visible.map((def) => {
@@ -461,6 +453,18 @@ function PanelEditor({
             )
           })}
         </div>
+      )}
+
+      {open && !panel.singleton && (
+        <label className="tcx-panel__filter">
+          <span>Apply only to items:</span>
+          <input
+            value={panel.itemFilter}
+            onChange={(e) => onChange({ ...panel, itemFilter: e.target.value })}
+            placeholder="2001-2005, 20*  (default blank = all)"
+            spellCheck={false}
+          />
+        </label>
       )}
 
       {open && (

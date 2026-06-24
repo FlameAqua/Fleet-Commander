@@ -11,11 +11,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 44px; /* matches the title-bar overlay height */
-  padding: 0 1.25rem;
-  /* reserve the right edge for the native window controls (Window Controls
-     Overlay); falls back to 0 in a plain browser. */
-  padding-right: calc(100% - env(titlebar-area-width, 100%) + 0.75rem);
+  height: 40px;
+  padding: 0 0 0 1.25rem;
   border-bottom: 1px solid var(--border);
   background: color-mix(in srgb, var(--panel) 80%, transparent);
   backdrop-filter: blur(8px);
@@ -31,23 +28,30 @@
 
 .app__baractions {
   display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  -webkit-app-region: no-drag;
+  align-items: stretch;
+  gap: 0.5rem;
+  height: 100%;
 }
 
 .app__theme {
-  font: inherit;
-  font-size: 0.8rem;
-  padding: 0.3rem 0.7rem;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: rgba(127, 127, 127, 0.12);
-  color: var(--text);
+  -webkit-app-region: no-drag;
+  align-self: center;
+  font-size: 1rem;
+  line-height: 1;
+  width: 30px;
+  height: 26px;
+  border: none;
+  border-radius: 6px;
+  background: rgba(127, 127, 127, 0.14);
+  color: var(--text-h);
   cursor: pointer;
 }
 .app__theme:hover {
-  background: rgba(127, 127, 127, 0.22);
+  background: rgba(127, 127, 127, 0.26);
+}
+.app__offline {
+  -webkit-app-region: no-drag;
+  align-self: center;
 }
 
 .app__offline {
@@ -106,8 +110,9 @@
 .app__runerror {
   margin-top: 0.6rem;
   font-size: 0.85rem;
-  color: #ffb4b4;
-  background: #3b1414;
+  color: var(--error-text);
+  background: var(--error-bg);
+  border: 1px solid var(--error-border);
   padding: 0.5rem 0.7rem;
   border-radius: 6px;
 }

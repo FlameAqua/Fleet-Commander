@@ -7,6 +7,8 @@ export function Clouds() {
       <Cloud className="cloud cloud--a" />
       <Cloud className="cloud cloud--b" />
       <Cloud className="cloud cloud--c" />
+      <Cloud className="cloud cloud--d" />
+      <Cloud className="cloud cloud--e" />
     </div>
   )
 }

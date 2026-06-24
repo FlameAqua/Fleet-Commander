@@ -26,7 +26,7 @@ const TABS: TabDef[] = [
   {
     id: 'custom',
     label: 'Custom Script',
-    actions: [{ id: 'custom_script', label: 'Custom Script', blurb: 'Run a script from your library on the selected systems.' }],
+    actions: [{ id: 'custom_script', label: 'Custom Script', blurb: 'Run any script on the selected systems.' }],
   },
   {
     id: 'maintenance',

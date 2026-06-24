@@ -120,10 +120,63 @@
   background: rgba(217, 138, 138, 0.18);
 }
 
-.src-encdec {
+/* CSV tools cog (encrypt / decrypt / open folder) */
+.src-tools {
+  position: relative;
   margin-left: auto;
   display: inline-flex;
-  gap: 0.4rem;
+}
+.src-cog {
+  font: inherit;
+  font-size: 1rem;
+  line-height: 1;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--muted);
+  cursor: pointer;
+}
+.src-cog:hover {
+  color: var(--text);
+  background: rgba(127, 127, 127, 0.12);
+}
+.src-cog[aria-expanded='true'] {
+  color: var(--text);
+  border-color: var(--accent);
+}
+/* Portaled to <body>: fixed coords come from the cog's rect (inline style). */
+.src-tools__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1400;
+}
+.src-tools__menu {
+  position: fixed;
+  z-index: 1450;
+  min-width: 180px;
+  display: flex;
+  flex-direction: column;
+  padding: 0.25rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+}
+.src-tools__menu button {
+  font: inherit;
+  font-size: 0.85rem;
+  text-align: left;
+  padding: 0.45rem 0.6rem;
+  border: none;
+  border-radius: 5px;
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+}
+.src-tools__menu button:hover {
+  background: rgba(142, 162, 255, 0.16);
 }
 
 .src-mapping {
@@ -166,8 +219,14 @@
   font-size: 0.83rem;
 }
 .src-notice--error {
-  background: #3b1414;
-  color: #ffb4b4;
+  background: var(--error-bg);
+  color: var(--error-text);
+  border: 1px solid var(--error-border);
+}
+.src-notice--ok {
+  background: rgba(70, 196, 106, 0.12);
+  color: #4f9d63;
+  border: 1px solid rgba(70, 196, 106, 0.4);
 }
 
 .src-hint {
