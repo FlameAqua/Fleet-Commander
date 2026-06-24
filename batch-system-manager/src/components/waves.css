@@ -1,0 +1,99 @@
+.waves {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 90px;
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
+}
+.waves__svg {
+  width: 100%;
+  height: 100%;
+}
+
+.waves__parallax > use {
+  animation: fc-wave-move 18s cubic-bezier(0.55, 0.5, 0.45, 0.5) infinite;
+}
+.waves__w1 {
+  fill: rgba(99, 140, 255, 0.16);
+  animation-delay: -2s;
+  animation-duration: 13s;
+}
+.waves__w2 {
+  fill: rgba(99, 140, 255, 0.12);
+  animation-delay: -3s;
+  animation-duration: 17s;
+}
+.waves__w3 {
+  fill: rgba(99, 140, 255, 0.08);
+  animation-delay: -4s;
+  animation-duration: 21s;
+}
+.waves__w4 {
+  fill: rgba(99, 140, 255, 0.16);
+  animation-delay: -5s;
+  animation-duration: 26s;
+}
+
+@keyframes fc-wave-move {
+  0% {
+    transform: translate3d(-90px, 0, 0);
+  }
+  100% {
+    transform: translate3d(85px, 0, 0);
+  }
+}
+
+/* Occasional sailing ship */
+.ship {
+  position: absolute;
+  bottom: 40px;
+  left: 0;
+  width: 44px;
+  height: 30px;
+  transform: translateX(-12vw);
+  animation: fc-ship-sail 52s linear infinite;
+  will-change: transform;
+  z-index: 1;
+}
+.ship__bob {
+  width: 100%;
+  height: 100%;
+  transform-origin: 50% 80%;
+  animation: fc-ship-bob 4.5s ease-in-out infinite;
+}
+@keyframes fc-ship-sail {
+  0% {
+    transform: translateX(-12vw);
+  }
+  46% {
+    transform: translateX(112vw);
+  }
+  100% {
+    transform: translateX(112vw);
+  }
+}
+@keyframes fc-ship-bob {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-2.5deg);
+  }
+  50% {
+    transform: translateY(-2px) rotate(2.5deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .waves__parallax > use {
+    animation: none;
+  }
+  .ship {
+    animation: none;
+    transform: translateX(-30vw);
+  }
+  .ship__bob {
+    animation: none;
+  }
+}

@@ -1,0 +1,41 @@
+.seg {
+  position: relative;
+  display: inline-grid;
+  grid-template-columns: repeat(var(--seg-count), 1fr);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  overflow: hidden;
+}
+.seg button {
+  position: relative;
+  z-index: 1;
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 600;
+  white-space: nowrap;
+  padding: 0.4rem 1.05rem;
+  border: none;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 0.25s ease;
+}
+.seg button:hover {
+  color: var(--text);
+}
+.seg button.is-active {
+  color: #fff;
+}
+.seg__slider {
+  position: absolute;
+  z-index: 0;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: calc(100% / var(--seg-count));
+  background: var(--accent);
+  border-radius: 7px;
+  transform: translateX(calc(var(--seg-index) * 100%));
+  transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+}

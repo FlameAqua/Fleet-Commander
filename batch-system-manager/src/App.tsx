@@ -1,0 +1,505 @@
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { apiGet, getConfig } from './api'
+import { csvVariableNames } from './lib/csv'
+import { SourcePanel } from './features/source/SourcePanel'
+import { emptySource, type SourceMode, type SourceState } from './features/source/sourceModel'
+import { ActionPanel } from './features/run/ActionPanel'
+import { ResultsPanel } from './features/run/ResultsPanel'
+import { useDeployRun } from './features/run/useDeployRun'
+import { buildDeployForm, type ActionId, type DeployConfigForm, type RunMode } from './features/run/deployForm'
+import { selectedHosts, restrictToHost, restrictToHosts, chunk } from './features/run/hosts'
+import { assessRisk, type RiskAssessment } from './features/run/riskAssessment'
+import {
+  CustomScriptPanel,
+  emptyCustomScript,
+  resolveCustomScript,
+  type CustomScriptState,
+} from './features/run/CustomScriptPanel'
+import { ThreecxPanel } from './features/threecx/ThreecxPanel'
+import {
+  buildQuickActionConfig,
+  buildThreecxConfig,
+  emptyThreecx,
+  targetCount,
+  type QuickAction,
+  type ThreecxOperation,
+  type ThreecxState,
+} from './features/threecx/threecxModel'
+import { usePrompt } from './components/PromptProvider'
+import { Splash } from './components/Splash'
+import { Stars } from './components/Stars'
+import { Clouds } from './components/Clouds'
+import { Waves } from './components/Waves'
+import './App.css'
+
+type Theme = 'night' | 'day'
+const OVERLAY: Record<Theme, { color: string; symbolColor: string; height: number }> = {
+  night: { color: '#16171d', symbolColor: '#c7ccd6', height: 44 },
+  day: { color: '#eef4fc', symbolColor: '#28344c', height: 44 },
+}
+
+type Health = 'checking' | 'ok' | 'down'
+type Step = 'source' | 'action'
+
+const INITIAL_CONFIG: DeployConfigForm = {
+  version: 'latest',
+  interface: '',
+  hep_server: '',
+  capture_mode: '',
+  discard_methods: '',
+  maxWorkers: 10,
+  strictHostKeys: false,
+}
+
+interface LastRun {
+  src: SourceState
+  pw?: string
+  op?: ThreecxOperation
+  act: ActionId
+  tcxConfig?: object
+}
+
+function App() {
+  const [health, setHealth] = useState<Health>('checking')
+  const [theme, setTheme] = useState<Theme>(() => {
+    try {
+      return localStorage.getItem('fc.theme') === 'day' ? 'day' : 'night'
+    } catch {
+      return 'night'
+    }
+  })
+  const [testHost, setTestHost] = useState<string | null>(null)
+  const [step, setStep] = useState<Step>('source')
+  // Per-mode source state so switching tabs doesn't wipe your selection.
+  const [sourceMode, setSourceMode] = useState<SourceMode>('compound')
+  const [sourceStates, setSourceStates] = useState<Record<SourceMode, SourceState>>(() => ({
+    compound: emptySource('compound'),
+    manual: emptySource('manual'),
+    test: emptySource('test'),
+  }))
+  const [testPassword, setTestPassword] = useState('')
+  const [action, setAction] = useState<ActionId>('threecx')
+  const [config, setConfig] = useState<DeployConfigForm>(INITIAL_CONFIG)
+  const [customScript, setCustomScript] = useState<CustomScriptState>(() => emptyCustomScript())
+  const [threecx, setThreecx] = useState<ThreecxState>(() => emptyThreecx())
+  const [runError, setRunError] = useState<string | null>(null)
+  const run = useDeployRun()
+  const prompt = usePrompt()
+  const lastRunRef = useRef<LastRun | null>(null)
+
+  const source = sourceStates[sourceMode]
+  const setSource = (s: SourceState) => setSourceStates((prev) => ({ ...prev, [s.mode]: s }))
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+    try {
+      localStorage.setItem('fc.theme', theme)
+    } catch {
+      /* ignore */
+    }
+    window.electron?.setTitleBarOverlay?.(OVERLAY[theme])
+  }, [theme])
+
+  useEffect(() => {
+    let cancelled = false
+    apiGet('/api/scripts')
+      .then(() => !cancelled && setHealth('ok'))
+      .catch(() => !cancelled && setHealth('down'))
+    getConfig()
+      .then((c) => {
+        if (cancelled) return
+        setTestHost(c.test_host)
+        setConfig((prev) => ({
+          ...prev,
+          interface: c.defaults.interface,
+          hep_server: c.defaults.hep_server,
+          capture_mode: c.defaults.capture_mode,
+          discard_methods: c.defaults.discard_methods,
+          maxWorkers: c.defaults.max_workers,
+        }))
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // Per-system variables available to custom scripts (Compound CSV column names).
+  const availableVars = useMemo(
+    () => (source.mode === 'compound' && source.file ? csvVariableNames(source.file.text) : []),
+    [source],
+  )
+
+  const isTest = source.mode === 'test'
+  const hostCount = isTest ? 1 : selectedHosts(source).length
+  const canProceed = isTest || hostCount > 0
+  const systemsLabel = isTest ? 'the test host' : `${hostCount} system${hostCount === 1 ? '' : 's'}`
+
+  function onModeChange(m: SourceMode) {
+    setSourceMode(m)
+  }
+
+  // Advancing to Step 2 asks for the Test-host password once (reused per run).
+  async function continueToActions() {
+    if (isTest && !testPassword) {
+      const pw = await prompt({
+        title: 'Test host password',
+        message: `Enter the password for ${testHost ?? 'the test host'} (reused for every action):`,
+        password: true,
+        confirmLabel: 'Continue',
+      })
+      if (!pw) return
+      setTestPassword(pw)
+    }
+    setStep('action')
+  }
+
+  async function ensureTestPassword(): Promise<string | null> {
+    if (testPassword) return testPassword
+    const pw = await prompt({
+      title: 'Test host password',
+      message: `Password for ${testHost ?? 'the test host'}:`,
+      password: true,
+      confirmLabel: 'Run',
+    })
+    if (pw === null) return null
+    if (!pw) {
+      setRunError('Password is required.')
+      return null
+    }
+    setTestPassword(pw)
+    return pw
+  }
+
+  /** Pick one of the shortlisted systems (Step 1). Returns its label or null. */
+  async function chooseHost(message: string, confirmLabel = 'Run'): Promise<string | null> {
+    const hosts = selectedHosts(source)
+    if (!hosts.length) {
+      setRunError('No systems selected — go back to Step 1 and select at least one.')
+      return null
+    }
+    if (hosts.length === 1) return hosts[0].value
+    return prompt({ title: 'Choose a system', message, options: hosts, confirmLabel })
+  }
+
+  async function startRun(
+    runMode: RunMode,
+    srcOverride?: SourceState,
+    testPw?: string,
+    opOverride?: ThreecxOperation,
+    actionOverride?: ActionId,
+    tcxConfigOverride?: object,
+    append?: boolean,
+  ) {
+    setRunError(null)
+    const src = srcOverride ?? source
+    const act = actionOverride ?? action
+    const op = opOverride ?? threecx.operation
+    // Skip validation on a fallback replay or a prebuilt (Quick Action) config.
+    if (act === 'threecx' && !opOverride && !tcxConfigOverride && runMode !== 'fallback') {
+      if ((op === 'audit' || op === 'apply') && targetCount(threecx) === 0) {
+        setRunError('Tick at least one field — or use “Probe for all available fields” to discover them.')
+        return
+      }
+      if (op === 'import') {
+        if (!threecx.importFile) {
+          setRunError('Pick a previously-exported Config JSON file to import.')
+          return
+        }
+        if (threecx.strategy === 'mirror') {
+          const confirmText = await prompt({
+            title: 'Confirm MIRROR',
+            message: 'Mirror DELETES items on the target that are absent from the source. Type MIRROR to confirm:',
+            confirmLabel: 'Confirm',
+          })
+          if (confirmText === null) return
+          if (confirmText.trim() !== 'MIRROR') {
+            setRunError('Mirror not confirmed — you must type MIRROR exactly.')
+            return
+          }
+        }
+      }
+    }
+    try {
+      const form = buildDeployForm({
+        action: act,
+        runMode,
+        config,
+        source: src,
+        testPassword: testPw,
+        fallbackHosts: run.failedLabels,
+        customScript: act === 'custom_script' ? resolveCustomScript(customScript) ?? undefined : undefined,
+        threecxConfig:
+          act === 'threecx'
+            ? (tcxConfigOverride ??
+              buildThreecxConfig(opOverride ? { ...threecx, operation: opOverride } : threecx, src.mode === 'compound'))
+            : undefined,
+      })
+      // Remember this run so "Retry failed hosts" replays exactly what we did.
+      if (runMode !== 'fallback') {
+        lastRunRef.current = { src, pw: testPw, op: act === 'threecx' ? op : undefined, act, tcxConfig: tcxConfigOverride }
+      }
+      void run.start(form, { append })
+    } catch (e) {
+      setRunError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  // Pre-run approval ("second approval") + staged batch rollout state.
+  const [approval, setApproval] = useState<{ assessment: RiskAssessment; systems: number; canBatch: boolean; act?: ActionId } | null>(null)
+  const [batchOn, setBatchOn] = useState(false)
+  const [batchSize, setBatchSize] = useState(5)
+  const [batchQueue, setBatchQueue] = useState<{ batches: string[][]; idx: number; act?: ActionId } | null>(null)
+
+  // Primary "Run" — read-only actions run straight away; modifying/destructive
+  // ones go through the approval modal first.
+  function onRun(actionOverride?: ActionId) {
+    setRunError(null)
+    const act = actionOverride ?? action
+    if (actionOverride && actionOverride !== action) setAction(actionOverride)
+    const assessment = assessRisk(act, threecx, customScript)
+    if (assessment.level === 'read-only') {
+      void execute(0, actionOverride)
+      return
+    }
+    setBatchOn(false)
+    setApproval({ assessment, systems: isTest ? 1 : hostCount, canBatch: !isTest && hostCount > 1, act: actionOverride })
+  }
+
+  // Execute the current action: all selected hosts at once, or in batches of N.
+  async function execute(size: number, act?: ActionId) {
+    setApproval(null)
+    setBatchQueue(null)
+    if (isTest) {
+      const pw = await ensureTestPassword()
+      if (pw === null) return
+      return startRun('test', source, pw, undefined, act)
+    }
+    if (size > 0) {
+      const labels = selectedHosts(source).map((h) => h.value)
+      const batches = chunk(labels, size)
+      setBatchQueue({ batches, idx: 0, act })
+      return startRun('universal', restrictToHosts(source, batches[0]), undefined, undefined, act)
+    }
+    startRun('universal', undefined, undefined, undefined, act)
+  }
+
+  function continueBatch() {
+    const bq = batchQueue
+    if (!bq) return
+    const idx = bq.idx + 1
+    if (idx >= bq.batches.length) {
+      setBatchQueue(null)
+      return
+    }
+    setBatchQueue({ ...bq, idx })
+    void startRun('universal', restrictToHosts(source, bq.batches[idx]), undefined, undefined, bq.act, undefined, true)
+  }
+
+  // 3CX "Probe for all available fields" — runs probe on ONE chosen system.
+  async function onProbe() {
+    setRunError(null)
+    if (isTest) {
+      const pw = await ensureTestPassword()
+      if (pw === null) return
+      return startRun('test', source, pw, 'probe')
+    }
+    const chosen = await chooseHost('Choose a system to probe for all available fields:', 'Probe')
+    if (chosen === null) return
+    startRun('universal', restrictToHost(source, chosen), undefined, 'probe')
+  }
+
+  function onFallback() {
+    const lr = lastRunRef.current
+    if (!lr) return void startRun('fallback')
+    void startRun('fallback', lr.src, lr.pw, lr.op, lr.act, lr.tcxConfig)
+  }
+
+  // 3CX Quick Action (Copy BLFs / CID / Audio Cleanup): builds an apply config
+  // for the Users entity and runs it on the shortlisted systems.
+  async function onQuickAction(act: QuickAction, sourceExt: string, targets: string) {
+    setRunError(null)
+    if (act.needsSource && !sourceExt.trim()) return setRunError('Source extension is required.')
+    if (!targets.trim()) return setRunError('Target extensions are required.')
+    const cfg = buildQuickActionConfig(threecx, act, sourceExt, targets, source.mode === 'compound')
+    if (isTest) {
+      const pw = await ensureTestPassword()
+      if (pw === null) return
+      return startRun('test', source, pw, undefined, undefined, cfg)
+    }
+    const hosts = selectedHosts(source)
+    if (hosts.length > 1) {
+      const ok = window.confirm(
+        `“${act.label}” will be applied to ${hosts.length} systems. Extensions are often custom per-system — apply to all of them?`,
+      )
+      if (!ok) return
+    }
+    startRun('universal', undefined, undefined, undefined, undefined, cfg)
+  }
+
+  // Quick Actions have their own per-card buttons; hide the shared Run button.
+  const runHidden = action === 'threecx' && threecx.operation === 'quickactions'
+
+  // Why the primary Run button is disabled (3CX needs entities / a file).
+  function runDisabledReason(): string | null {
+    if (action !== 'threecx') return null
+    const op = threecx.operation
+    if (op === 'audit' || op === 'apply') {
+      if (targetCount(threecx) === 0) return threecx.panels.length === 0 ? 'No fields added.' : 'Set a value for at least one field.'
+    }
+    if (op === 'export' && threecx.panels.length === 0) return 'No entities added.'
+    if (op === 'import' && !threecx.importFile) return 'Choose a Config JSON file.'
+    return null
+  }
+
+  return (
+    <div className="app">
+      <Splash ready={health === 'ok'} />
+      {theme === 'night' ? <Stars /> : <Clouds />}
+      <Waves />
+
+      <header className="app__bar">
+        <div className="app__brand">Fleet Commander</div>
+        <div className="app__baractions">
+          {health === 'down' && <div className="app__offline">⚠ Backend offline</div>}
+          <button
+            type="button"
+            className="app__theme"
+            onClick={() => setTheme((t) => (t === 'night' ? 'day' : 'night'))}
+            title="Toggle Day / Night"
+          >
+            {theme === 'night' ? '☀ Day Mode' : '🌙 Night Mode'}
+          </button>
+        </div>
+      </header>
+
+      <main className="app__main">
+        {step === 'source' ? (
+          <section className="step" key="source">
+            <h2 className="step__title">
+              <span className="step__num">1</span> Choose your fleet
+            </h2>
+            <SourcePanel source={source} onChange={setSource} onModeChange={onModeChange} testHost={testHost} />
+            <div className="step__nav">
+              <span className="step__hint">
+                {canProceed ? `Ready — working on ${systemsLabel}.` : 'Select at least one system to continue.'}
+              </span>
+              <button type="button" className="run__btn run__btn--primary" disabled={!canProceed} onClick={() => void continueToActions()}>
+                Continue to actions →
+              </button>
+            </div>
+          </section>
+        ) : (
+          <section className="step" key="action">
+            <div className="step__crumb">
+              <button type="button" className="step__back" onClick={() => setStep('source')}>
+                ← Change systems
+              </button>
+              <span className="step__on">
+                Working on <strong>{systemsLabel}</strong>
+              </span>
+            </div>
+            <h2 className="step__title">
+              <span className="step__num">2</span> Choose action
+            </h2>
+            <ActionPanel
+              action={action}
+              setAction={setAction}
+              running={run.status === 'running'}
+              runHint={runDisabledReason()}
+              runHidden={runHidden}
+              onRun={onRun}
+              customScriptSlot={<CustomScriptPanel value={customScript} onChange={setCustomScript} variables={availableVars} />}
+              threecxSlot={
+                <ThreecxPanel
+                  value={threecx}
+                  onChange={setThreecx}
+                  onProbe={() => void onProbe()}
+                  onQuickAction={(a, src, targets) => void onQuickAction(a, src, targets)}
+                />
+              }
+            />
+            {runError && <div className="app__runerror">✕ {runError}</div>}
+
+            <ResultsPanel run={run} onFallback={onFallback} />
+
+            {batchQueue && run.status === 'done' && batchQueue.idx < batchQueue.batches.length - 1 && (
+              <div className="batchbar">
+                <span className="batchbar__msg">
+                  Batch {batchQueue.idx + 1} of {batchQueue.batches.length} complete — review the results above before continuing.
+                </span>
+                <div className="batchbar__actions">
+                  <button type="button" className="run__btn" onClick={() => setBatchQueue(null)}>
+                    Stop
+                  </button>
+                  <button type="button" className="run__btn run__btn--primary" onClick={continueBatch}>
+                    Continue with next {batchQueue.batches[batchQueue.idx + 1].length} →
+                  </button>
+                </div>
+              </div>
+            )}
+          </section>
+        )}
+      </main>
+
+      {approval && (
+        <div className="confirm__overlay" onMouseDown={() => setApproval(null)}>
+          <div className="confirm" onMouseDown={(e) => e.stopPropagation()}>
+            <div className="confirm__head">
+              <span className={`confirm__badge confirm__badge--${approval.assessment.level}`}>
+                {LEVEL_LABEL[approval.assessment.level]}
+              </span>
+              <h3>{approval.assessment.title}</h3>
+            </div>
+            <p className="confirm__summary">{approval.assessment.summary}</p>
+            {approval.assessment.details.length > 0 && (
+              <ul className="confirm__details">
+                {approval.assessment.details.map((d, i) => (
+                  <li key={i}>{d}</li>
+                ))}
+              </ul>
+            )}
+            <p className="confirm__systems">
+              This will run on <strong>{approval.systems}</strong> system{approval.systems === 1 ? '' : 's'}.
+            </p>
+            {approval.canBatch && (
+              <label className="confirm__batch">
+                <input type="checkbox" checked={batchOn} onChange={(e) => setBatchOn(e.target.checked)} />
+                <span>Roll out in batches of</span>
+                <input
+                  type="number"
+                  min={1}
+                  className="confirm__batchsize"
+                  value={batchSize}
+                  onChange={(e) => setBatchSize(Math.max(1, Number(e.target.value) || 1))}
+                  disabled={!batchOn}
+                />
+                <span>systems, pausing to review between each.</span>
+              </label>
+            )}
+            <div className="confirm__actions">
+              <button type="button" className="run__btn" onClick={() => setApproval(null)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className={`run__btn ${approval.assessment.level === 'destructive' ? 'run__btn--danger' : 'run__btn--primary'}`}
+                onClick={() => void execute(batchOn ? batchSize : 0, approval.act)}
+              >
+                {approval.assessment.level === 'destructive' ? 'I understand — run anyway' : 'Confirm & run'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+const LEVEL_LABEL: Record<RiskAssessment['level'], string> = {
+  'read-only': 'Read-only',
+  modifies: 'Modifies systems',
+  destructive: 'Destructive',
+}
+
+export default App

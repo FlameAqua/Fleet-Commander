@@ -1,0 +1,70 @@
+:root {
+  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
+  --mono: ui-monospace, 'Cascadia Code', Consolas, monospace;
+
+  font: 15px/1.5 var(--sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Night (default) — the dark, starry theme. */
+:root,
+:root[data-theme='night'] {
+  color-scheme: dark;
+  --text: #c7ccd6;
+  --text-h: #f3f4f6;
+  --muted: #8b909c;
+  --bg: #16171d;
+  --panel: #1c1e26;
+  --border: #2e303a;
+  --code-bg: #1f2028;
+  --accent: #8ea2ff;
+  --sky: radial-gradient(circle at 50% 8%, #1c2740 0%, #14151c 60%);
+}
+
+/* Day — bright sky, dark readable text, clouds instead of stars. */
+:root[data-theme='day'] {
+  color-scheme: light;
+  --text: #28344c;
+  --text-h: #0d1830;
+  --muted: #5b6b86;
+  --bg: #eef4fc;
+  --panel: #f6faff;
+  --border: #cfdcec;
+  --code-bg: #e2ecf8;
+  --accent: #3b6fd6;
+  --sky: linear-gradient(180deg, #bfe0ff 0%, #e7f2fd 55%, #eef4fc 100%);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  color: var(--text);
+  background: var(--bg);
+  background-image: var(--sky);
+  background-attachment: fixed;
+}
+
+#root {
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+}
+
+h1,
+h2 {
+  color: var(--text-h);
+  font-weight: 600;
+}
+
+code {
+  font-family: var(--mono);
+  font-size: 0.85em;
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  background: var(--code-bg);
+  color: var(--text-h);
+}

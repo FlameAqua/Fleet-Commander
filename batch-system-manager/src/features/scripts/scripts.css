@@ -1,0 +1,181 @@
+.scripts {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.scripts__header h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.05rem;
+}
+
+.scripts__dirbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  font-size: 0.85rem;
+}
+
+.scripts__dirlabel {
+  color: var(--muted, #888);
+}
+
+.scripts__dir {
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  background: rgba(127, 127, 127, 0.15);
+}
+
+.scripts button {
+  font: inherit;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid rgba(127, 127, 127, 0.35);
+  border-radius: 6px;
+  background: rgba(127, 127, 127, 0.1);
+  color: inherit;
+  cursor: pointer;
+}
+.scripts button:hover:not(:disabled) {
+  background: rgba(127, 127, 127, 0.22);
+}
+.scripts button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.scripts__notice {
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+.scripts__notice--info {
+  background: #10240f;
+  color: #9be39b;
+}
+.scripts__notice--error {
+  background: #3b1414;
+  color: #ffb4b4;
+}
+
+.scripts__body {
+  display: flex;
+  gap: 1rem;
+  height: 400px; /* list + editor share one height; the list scrolls */
+}
+
+.scripts__list {
+  flex: 0 0 300px;
+  border: 1px solid rgba(127, 127, 127, 0.25);
+  border-radius: 8px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.scripts__list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.8rem;
+  color: var(--muted, #888);
+  border-bottom: 1px solid rgba(127, 127, 127, 0.2);
+}
+.scripts__list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+.scripts__list li {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid rgba(127, 127, 127, 0.12);
+}
+.scripts__list li.is-selected {
+  background: rgba(99, 140, 255, 0.14);
+}
+.scripts__item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  text-align: left;
+  border: none !important;
+  background: transparent !important;
+  border-radius: 0 !important;
+  padding: 0.5rem 0.6rem !important;
+}
+.scripts__item-name {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+.scripts__item-meta {
+  font-size: 0.72rem;
+  color: var(--muted, #888);
+}
+.scripts__del {
+  border: none !important;
+  background: transparent !important;
+  border-radius: 0 !important;
+  color: #d98a8a;
+  padding: 0 0.7rem !important;
+}
+.scripts__del:hover:not(:disabled) {
+  background: rgba(217, 138, 138, 0.18) !important;
+}
+.scripts__empty {
+  padding: 1rem;
+  color: var(--muted, #888);
+  font-size: 0.85rem;
+  justify-content: center;
+}
+
+.scripts__editor {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+/* The library editor fills the column so it matches the list's height. */
+.scripts__editor .se {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.scripts__editor .se__ta {
+  flex: 1;
+  min-height: 0;
+  resize: none;
+}
+.scripts__editor-head {
+  display: flex;
+  gap: 0.5rem;
+}
+.scripts__editor-head input {
+  flex: 1;
+  font: inherit;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid rgba(127, 127, 127, 0.35);
+  border-radius: 6px;
+  background: rgba(127, 127, 127, 0.08);
+  color: inherit;
+}
+.scripts__save {
+  min-width: 90px;
+}
+.scripts__hint {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--muted, #888);
+}

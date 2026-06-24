@@ -1,0 +1,44 @@
+.stars {
+  position: fixed;
+  inset: 0 0 80px 0; /* leave the waterline clear at the bottom */
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
+}
+
+.star {
+  position: absolute;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 0 4px rgba(255, 255, 255, 0.55);
+  opacity: 0;
+  animation: fc-twinkle var(--dur, 4s) ease-in-out infinite;
+  animation-delay: var(--delay, 0s);
+}
+
+@keyframes fc-twinkle {
+  0%,
+  100% {
+    opacity: 0.05;
+    transform: scale(0.7);
+  }
+  50% {
+    opacity: 0.85;
+    transform: scale(1);
+  }
+}
+
+/* On a light theme, white stars vanish — tint them a soft blue instead. */
+@media (prefers-color-scheme: light) {
+  .star {
+    background: #7385c8;
+    box-shadow: 0 0 4px rgba(115, 133, 200, 0.45);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .star {
+    animation: none;
+    opacity: 0.35;
+  }
+}
