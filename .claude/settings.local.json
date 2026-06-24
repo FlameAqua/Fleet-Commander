@@ -1,7 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(grep -iE 'electron|vite|tsconfig|package|\\\\.ts$|\\\\.tsx$|main\\\\.js|preload\\\\.js')"
-    ]
-  }
-}
