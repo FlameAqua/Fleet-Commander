@@ -2,7 +2,7 @@ import { ScriptsPanel } from '../scripts/ScriptsPanel'
 import { Segmented } from '../../components/Segmented'
 import { ScriptEditor } from '../../components/ScriptEditor'
 import { readFileText } from '../../lib/file'
-import type { CustomScriptArgs, RootMode } from './deployForm'
+import type { CustomScriptArgs, RootMode, ScriptInterpreter } from './deployForm'
 import './run.css'
 
 export type ScriptSource = 'library' | 'paste' | 'upload'
@@ -12,6 +12,7 @@ export interface CustomScriptState {
   library: { name: string; content: string }
   paste: string
   upload: { name: string; content: string }
+  interpreter: ScriptInterpreter
   rootMode: RootMode
   rootPassword: string
   rootColumn: string
@@ -23,6 +24,7 @@ export function emptyCustomScript(): CustomScriptState {
     library: { name: '', content: '' },
     paste: '',
     upload: { name: '', content: '' },
+    interpreter: 'auto',
     rootMode: 'none',
     rootPassword: '',
     rootColumn: '',
@@ -31,7 +33,12 @@ export function emptyCustomScript(): CustomScriptState {
 
 /** Resolve the script-to-run from the active sub-mode, or null if none. */
 export function resolveCustomScript(cs: CustomScriptState): CustomScriptArgs | null {
-  const root = { rootMode: cs.rootMode, rootPassword: cs.rootPassword, rootColumn: cs.rootColumn }
+  const root = {
+    rootMode: cs.rootMode,
+    rootPassword: cs.rootPassword,
+    rootColumn: cs.rootColumn,
+    interpreter: cs.interpreter,
+  }
   if (cs.source === 'library') {
     return cs.library.content.trim()
       ? { content: cs.library.content, filename: cs.library.name || 'library-script.sh', ...root }
@@ -75,7 +82,12 @@ export function CustomScriptPanel({ value, onChange, variables }: Props) {
       <Segmented options={SOURCES} value={value.source} onChange={(s) => set({ source: s })} ariaLabel="Script source" />
 
       {value.source === 'library' && (
-        <ScriptsPanel onActiveChange={(name, content) => set({ library: { name, content } })} variables={variables} />
+        <ScriptsPanel
+          onActiveChange={(name, content) => set({ library: { name, content } })}
+          variables={variables}
+          interpreter={value.interpreter}
+          onInterpreterChange={(i) => set({ interpreter: i })}
+        />
       )}
 
       {value.source === 'paste' && (
@@ -84,6 +96,8 @@ export function CustomScriptPanel({ value, onChange, variables }: Props) {
           onChange={(v) => set({ paste: v })}
           variables={variables}
           placeholder={'#!/bin/bash\nset -e\necho "Hello from $(hostname)"'}
+          interpreter={value.interpreter}
+          onInterpreterChange={(i) => set({ interpreter: i })}
         />
       )}
 
@@ -97,17 +111,24 @@ export function CustomScriptPanel({ value, onChange, variables }: Props) {
         </div>
       )}
 
-      <fieldset className="cs__root">
-        <legend>Run as</legend>
-        <label className="cs__radio">
-          <input
-            type="radio"
-            name="cs-root"
-            checked={value.rootMode === 'none'}
-            onChange={() => set({ rootMode: 'none' })}
-          />
-          The SSH login user (no escalation)
-        </label>
+      {value.interpreter === 'routeros' ? (
+        <p className="run__note">
+          Commands are sent straight to the RouterOS console (e.g. <code>/system resource print</code>).
+          POSIX features — <code>su</code> escalation and <code>$variable</code> injection — don’t apply on
+          RouterOS.
+        </p>
+      ) : (
+        <fieldset className="cs__root">
+          <legend>Run as</legend>
+          <label className="cs__radio">
+            <input
+              type="radio"
+              name="cs-root"
+              checked={value.rootMode === 'none'}
+              onChange={() => set({ rootMode: 'none' })}
+            />
+            The SSH login user (no escalation)
+          </label>
         <label className="cs__radio">
           <input
             type="radio"
@@ -146,11 +167,12 @@ export function CustomScriptPanel({ value, onChange, variables }: Props) {
             spellCheck={false}
           />
         )}
-        <p className="run__note">
-          Escalation uses <code>su</code> with the root password (no sudoers needed). The password is held in
-          memory only.
-        </p>
-      </fieldset>
+          <p className="run__note">
+            Escalation uses <code>su</code> with the root password (no sudoers needed). The password is held in
+            memory only.
+          </p>
+        </fieldset>
+      )}
     </div>
   )
 }

@@ -2,7 +2,7 @@
   "name": "fleet-commander",
   "private": true,
   "version": "1.0.0-beta.1",
-  "description": "Fleet Commander — batch SSH operations and 3CX management across a fleet of phone systems.",
+  "description": "Fleet Commander",
   "author": "OneContact",
   "type": "module",
   "main": "electron/main.js",
@@ -22,6 +22,7 @@
     "format": "prettier --write ./src"
   },
   "dependencies": {
+    "electron-updater": "^6.8.9",
     "react": "^19.2.6",
     "react-dom": "^19.2.6"
   },
@@ -51,6 +52,13 @@
   "build": {
     "appId": "ie.onecontact.fleetcommander",
     "productName": "Fleet Commander",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "FlameAqua",
+        "repo": "Fleet-Commander"
+      }
+    ],
     "directories": {
       "output": "release-builds",
       "buildResources": "public"
@@ -62,18 +70,22 @@
       {
         "from": "backend/dist",
         "to": "backend",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       },
       {
         "from": "dist",
         "to": "spa",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "win": {
       "target": "nsis",
       "icon": "public/fleet.ico",
-      "artifactName": "Fleet-Commander-Beta-1-Setup.${ext}"
+      "artifactName": "Fleet-Commander-${version}-Setup.${ext}"
     },
     "nsis": {
       "oneClick": false,
@@ -82,7 +94,9 @@
       "shortcutName": "Fleet Commander"
     },
     "linux": {
-      "target": ["AppImage"],
+      "target": [
+        "AppImage"
+      ],
       "icon": "public/fleet.ico",
       "category": "Utility"
     },

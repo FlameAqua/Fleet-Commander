@@ -3176,7 +3176,10 @@ def deploy_host(
     # We prepend `export NAME='VAL'` lines to the script body — taking care
     # to keep any shebang as the literal first line so an output dump still
     # looks like a normal script.
-    if host_vars:
+    # RouterOS has no POSIX shell, so the `export NAME='VAL'` prelude is
+    # meaningless there — skip it (RouterOS scripts read CSV columns, if at
+    # all, by other means).
+    if host_vars and interpreter != "routeros":
         prelude = _build_host_vars_prelude(host_vars)
         if prelude:
             if script.startswith("#!"):
@@ -3189,6 +3192,44 @@ def deploy_host(
                 script = prelude + script
 
     try:
+        # ---- RouterOS (MikroTik) path -----------------------------------------
+        # RouterOS lands you in its own console over SSH — there is no `sh`,
+        # no `su`, no POSIX env. Piping to `sh -s` fails with
+        # "bad command name sh". Instead we run the script text directly as
+        # console command(s) and read the result back.
+        if interpreter == "routeros":
+            stdin, stdout, stderr = client.exec_command(script, timeout=cfg.exec_timeout)
+            stdout.channel.set_combine_stderr(True)
+            chan = stdout.channel
+            chan.settimeout(cfg.exec_timeout)
+            ros_chunks: List[str] = []
+            try:
+                for raw in stdout:
+                    line = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw
+                    line = line.rstrip("\r\n")
+                    ros_chunks.append(line + "\n")
+                    if log_callback:
+                        try:
+                            log_callback(line)
+                        except Exception:
+                            pass
+            except socket.timeout:
+                return HostResult(target.label, False, "exec",
+                                  f"command timed out after {cfg.exec_timeout}s",
+                                  output="".join(ros_chunks),
+                                  duration_s=time.time() - start)
+            exit_status = chan.recv_exit_status()
+            output = "".join(ros_chunks).strip()
+            low = output.lower()
+            ros_err = ("bad command name" in low or "syntax error" in low
+                       or "expected end of command" in low
+                       or "expected command name" in low)
+            ok = (exit_status == 0) and not ros_err
+            msg = success_text if ok else f"RouterOS command failed (exit {exit_status})"
+            return HostResult(target.label, ok, "done" if ok else "exec", msg,
+                              exit_status=exit_status, output=output,
+                              duration_s=time.time() - start)
+
         if root_password:
             # ---- Root-escalation path via su + PTY ----------------------------
             try:

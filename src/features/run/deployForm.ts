@@ -14,6 +14,7 @@ export interface DeployConfigForm {
 }
 
 export type RootMode = 'none' | 'inline' | 'csv'
+export type ScriptInterpreter = 'auto' | 'routeros'
 
 export interface CustomScriptArgs {
   content: string
@@ -21,6 +22,8 @@ export interface CustomScriptArgs {
   rootMode: RootMode
   rootPassword?: string
   rootColumn?: string
+  /** 'routeros' sends commands to the MikroTik console instead of a POSIX shell. */
+  interpreter?: ScriptInterpreter
 }
 
 export interface BuildArgs {
@@ -62,6 +65,7 @@ export function buildDeployForm(args: BuildArgs): FormData {
       throw new Error('Provide a script to run (library, paste, or upload).')
     }
     fd.append('custom_script', new Blob([cs.content], { type: 'text/x-sh' }), cs.filename || 'script.sh')
+    if (cs.interpreter === 'routeros') fd.append('custom_interpreter', 'routeros')
     if (cs.rootMode === 'csv') {
       if (cs.rootColumn?.trim()) fd.append('root_password_column', cs.rootColumn.trim())
     } else if (cs.rootMode === 'inline') {

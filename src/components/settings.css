@@ -1,0 +1,213 @@
+.settings__overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+.settings {
+  width: min(560px, 94vw);
+  max-height: 88vh;
+  overflow-y: auto;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  /* Left corners rounded; right side (where the scrollbar lives) kept square
+     so the scrollbar sits flush with sharp edges on Windows 11. */
+  border-radius: 12px 0 0 12px;
+  padding: 1.1rem 1.35rem 1.3rem;
+  box-shadow: 0 16px 50px rgba(0, 0, 0, 0.45);
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+  border-radius: 4px;
+}
+.settings::-webkit-scrollbar {
+  width: 12px;
+}
+.settings::-webkit-scrollbar-track {
+  background: transparent;
+}
+.settings::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 0; /* square thumb — sharp edges */
+  border: 3px solid var(--bg);
+}
+.settings::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+}
+.settings__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.4rem;
+}
+.settings__head h3 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+.settings__close {
+  border: none;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.95rem;
+}
+.settings__section {
+  padding: 0.85rem 0;
+  border-top: 1px solid var(--border);
+}
+.settings__section h4 {
+  margin: 0 0 0.4rem;
+  font-size: 0.92rem;
+  color: var(--text-h);
+}
+.settings__hint {
+  margin: 0 0 0.5rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.settings__toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.25rem 0;
+  font-size: 0.88rem;
+}
+.settings__tag {
+  margin-left: 0.4rem;
+  font-style: normal;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.02rem 0.3rem;
+}
+
+.settings__folder {
+  margin-bottom: 0.7rem;
+}
+.settings__folderhead {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.2rem;
+}
+.settings__folderlabel {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.settings__reset {
+  border: none;
+  background: none;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+}
+.settings__path {
+  display: block;
+  font-family: var(--mono);
+  font-size: 0.76rem;
+  color: var(--text);
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.35rem 0.5rem;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.settings__folderbtns {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.35rem;
+}
+.settings__btn {
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(127, 127, 127, 0.1);
+  color: inherit;
+  cursor: pointer;
+}
+.settings__btn:hover {
+  background: rgba(127, 127, 127, 0.2);
+}
+.settings__btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.settings__slider {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.6rem;
+  font-size: 0.85rem;
+}
+.settings__slider input[type='range'] {
+  flex: 1;
+  accent-color: var(--accent);
+}
+.settings__slidernum {
+  min-width: 2.6rem;
+  text-align: right;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.settings__err {
+  margin-top: 0.4rem;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.82rem;
+  background: var(--error-bg);
+  color: var(--error-text);
+  border: 1px solid var(--error-border);
+  border-radius: 6px;
+}
+
+.settings__rn {
+  margin-bottom: 0.6rem;
+}
+.settings__rnhead {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  font-size: 0.85rem;
+}
+.settings__rnhead span {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.settings__rn ul {
+  margin: 0.25rem 0 0;
+  padding-left: 1.2rem;
+}
+.settings__rn li {
+  font-size: 0.83rem;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.settings__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--border);
+}
+.settings__ver {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.settings__link {
+  border: none;
+  background: none;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.85rem;
+}

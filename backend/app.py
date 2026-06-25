@@ -152,8 +152,10 @@ def _resolve_scripts_dir(raw):
     directories outside our project root).
     """
     if not raw or not str(raw).strip():
-        os.makedirs(SCRIPTS_DIR, exist_ok=True)
-        return SCRIPTS_DIR
+        # No per-request dir → use the persisted override (or the default).
+        d = bsm_paths.scripts_dir()
+        os.makedirs(d, exist_ok=True)
+        return d
     p = os.path.abspath(os.path.expanduser(str(raw).strip()))
     if not os.path.exists(p):
         raise ValueError(f"directory does not exist: {p}")
@@ -433,7 +435,7 @@ def decrypt_csv_endpoint():
         safe = _sanitize_csv_name(server_name)
         if not safe or not safe.lower().endswith(".enc"):
             return jsonify({"ok": False, "error": "invalid server file name"}), 400
-        path = os.path.join(bsm_paths.default_csv_dir(), safe)
+        path = os.path.join(bsm_paths.csv_dir(), safe)
         if not os.path.isfile(path):
             return jsonify({"ok": False, "error": "server file not found"}), 404
         with open(path, "rb") as f:
@@ -541,7 +543,7 @@ def encrypt_csv_endpoint():
     # (the data-dir csv/ folder) so it shows up in "Import from csv folder…"
     # for future use, instead of being returned as a one-off download.
     if request.form.get("save", "").lower() in ("1", "true", "yes"):
-        d = bsm_paths.default_csv_dir()
+        d = bsm_paths.csv_dir()
         try:
             os.makedirs(d, exist_ok=True)
             with open(os.path.join(d, filename), "wb") as f:
@@ -662,7 +664,7 @@ def _sanitize_csv_name(name: str) -> str:
 
 @app.route("/api/csv-files")
 def list_csv_files():
-    d = bsm_paths.default_csv_dir()
+    d = bsm_paths.csv_dir()
     items = []
     try:
         for name in sorted(os.listdir(d)):
@@ -692,7 +694,7 @@ def get_csv_file(name):
         return jsonify({"ok": False, "error": "invalid file name"}), 400
     if safe.lower().endswith(".enc"):
         return jsonify({"ok": False, "error": "encrypted file — decrypt with the master password"}), 400
-    path = os.path.join(bsm_paths.default_csv_dir(), safe)
+    path = os.path.join(bsm_paths.csv_dir(), safe)
     if not os.path.isfile(path):
         return jsonify({"ok": False, "error": "not found"}), 404
     with open(path, "rb") as f:
@@ -711,7 +713,7 @@ def open_csv_folder():
     the app binds 127.0.0.1 — the "server" is the operator's own machine, so
     the Explorer/Finder window appears on their desktop.
     """
-    d = bsm_paths.default_csv_dir()
+    d = bsm_paths.csv_dir()
     try:
         os.makedirs(d, exist_ok=True)
         if sys.platform.startswith("win"):
@@ -723,6 +725,178 @@ def open_csv_folder():
     except Exception as e:  # noqa: BLE001
         return jsonify({"ok": False, "error": f"Couldn't open the folder: {e}"}), 500
     return jsonify({"ok": True, "dir": d})
+
+
+def _open_in_file_manager(d: str):
+    os.makedirs(d, exist_ok=True)
+    if sys.platform.startswith("win"):
+        os.startfile(d)  # noqa: S606 — local desktop, trusted path
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", d])
+    else:
+        subprocess.Popen(["xdg-open", d])
+
+
+_SHIP_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"}
+_MAX_SHIP_BYTES = 3 * 1024 * 1024  # 3 MB per clip-art image
+_SHIP_BASE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._ -]{0,79}$")
+
+
+def _sanitize_ship_name(name: str) -> str:
+    n = os.path.basename((name or "").strip())
+    base, ext = os.path.splitext(n)
+    if ext.lower() not in _SHIP_EXTS or not _SHIP_BASE_RE.match(base):
+        return ""
+    return n
+
+
+@app.route("/api/ships")
+def list_ships():
+    """List the clip-art images available as ship art."""
+    d = bsm_paths.default_ships_dir()
+    items = []
+    try:
+        for name in sorted(os.listdir(d)):
+            if (os.path.isfile(os.path.join(d, name))
+                    and os.path.splitext(name)[1].lower() in _SHIP_EXTS):
+                items.append(name)
+    except OSError:
+        pass
+    return jsonify({"ok": True, "dir": d, "ships": items})
+
+
+@app.route("/api/ship/<path:name>")
+def get_ship(name):
+    """Serve a ship clip-art image by name."""
+    safe = _sanitize_ship_name(name)
+    if not safe:
+        return jsonify({"ok": False, "error": "invalid file name"}), 400
+    d = bsm_paths.default_ships_dir()
+    if not os.path.isfile(os.path.join(d, safe)):
+        return jsonify({"ok": False, "error": "not found"}), 404
+    return send_from_directory(d, safe)
+
+
+@app.route("/api/ship-upload", methods=["POST"])
+def upload_ship():
+    """Save an uploaded clip-art image into the ships folder."""
+    f = request.files.get("ship")
+    if not f or not f.filename:
+        return jsonify({"ok": False, "error": "No image uploaded."}), 400
+    safe = _sanitize_ship_name(f.filename)
+    if not safe:
+        return jsonify({
+            "ok": False,
+            "error": "Use a PNG / JPG / GIF / SVG / WEBP image with a simple name.",
+        }), 400
+    data = f.read()
+    if len(data) > _MAX_SHIP_BYTES:
+        return jsonify({"ok": False, "error": "Image too large (max 3 MB)."}), 400
+    d = bsm_paths.default_ships_dir()
+    try:
+        with open(os.path.join(d, safe), "wb") as out:
+            out.write(data)
+    except OSError as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+    return jsonify({"ok": True, "filename": safe})
+
+
+def _folder_for(which: str) -> str:
+    if which == "scripts":
+        return bsm_paths.scripts_dir()
+    if which == "ships":
+        return bsm_paths.default_ships_dir()
+    return bsm_paths.csv_dir()
+
+
+@app.route("/api/folder-path", methods=["POST"])
+def folder_path():
+    """Resolve a library folder's absolute path without opening it (so the
+    Electron app can open it itself and bring it to the foreground)."""
+    which = (request.get_json(silent=True) or {}).get("which", "csv")
+    d = _folder_for(which)
+    os.makedirs(d, exist_ok=True)
+    return jsonify({"ok": True, "path": d})
+
+
+@app.route("/api/open-folder", methods=["POST"])
+def open_folder():
+    """Open the CSV, Scripts, or Ships folder in the OS file manager."""
+    which = (request.get_json(silent=True) or {}).get("which", "csv")
+    d = _folder_for(which)
+    try:
+        _open_in_file_manager(d)
+    except Exception as e:  # noqa: BLE001
+        return jsonify({"ok": False, "error": f"Couldn't open the folder: {e}"}), 500
+    return jsonify({"ok": True, "dir": d})
+
+
+@app.route("/api/settings", methods=["GET", "POST"])
+def settings_endpoint():
+    """
+    Read or update persisted user settings. Today this covers the CSV and
+    Scripts library folder overrides; an empty/missing value clears an
+    override (back to the default data-dir folder).
+    """
+    if request.method == "POST":
+        data = request.get_json(silent=True) or {}
+        patch = {}
+        for key in ("csv_dir", "scripts_dir"):
+            if key not in data:
+                continue
+            val = data.get(key)
+            if val in (None, ""):
+                patch[key] = None
+            else:
+                p = os.path.abspath(os.path.expanduser(str(val).strip()))
+                if not os.path.isdir(p):
+                    return jsonify({"ok": False, "error": f"Not a folder: {p}"}), 400
+                patch[key] = p
+        bsm_paths.save_settings(patch)
+    s = bsm_paths.load_settings()
+    return jsonify({
+        "ok": True,
+        "csv_dir": bsm_paths.csv_dir(),
+        "scripts_dir": bsm_paths.scripts_dir(),
+        "csv_dir_custom": bool((s.get("csv_dir") or "").strip()),
+        "scripts_dir_custom": bool((s.get("scripts_dir") or "").strip()),
+        "default_csv_dir": bsm_paths.default_csv_dir(),
+        "default_scripts_dir": bsm_paths.default_scripts_dir(),
+    })
+
+
+@app.route("/api/pick-folder", methods=["POST"])
+def pick_folder():
+    """Open a native folder-picker and return the chosen path (or null)."""
+    try:
+        import tkinter
+        from tkinter import filedialog
+    except ImportError:
+        return jsonify({
+            "ok": False,
+            "error": "tkinter isn't available on this Python install; type the path manually.",
+        }), 503
+    title = (request.get_json(silent=True) or {}).get("title") or "Pick a folder"
+    result = {"path": None, "error": None}
+
+    def _run_picker():
+        try:
+            root = tkinter.Tk()
+            root.withdraw()
+            root.attributes("-topmost", True)
+            root.after(50, lambda: root.focus_force())
+            path = filedialog.askdirectory(title=title, mustexist=True)
+            root.destroy()
+            result["path"] = path or None
+        except Exception as e:  # noqa: BLE001
+            result["error"] = str(e)
+
+    th = threading.Thread(target=_run_picker, daemon=True)
+    th.start()
+    th.join(timeout=300)
+    if result["error"]:
+        return jsonify({"ok": False, "error": result["error"]}), 500
+    return jsonify({"ok": True, "path": result["path"]})
 
 
 @app.route("/")
@@ -932,6 +1106,12 @@ def deploy():
         # Be generous: user scripts can do anything (DB dumps, config changes, …)
         cfg.exec_timeout = max(cfg.exec_timeout, 600)
         interpreter  = deployer._get_interpreter(script)
+        # The operator can force RouterOS (MikroTik) mode, which sends the
+        # commands straight to the RouterOS console instead of a POSIX shell
+        # (RouterOS has no `sh`, so the default path fails with
+        # "bad command name sh"). See deployer.deploy_host's routeros branch.
+        if (request.form.get("custom_interpreter", "") or "").strip().lower() == "routeros":
+            interpreter = "routeros"
         require_marker = False   # user scripts don't emit our sentinel
         success_text = f"script completed ({script_file.filename})"
 

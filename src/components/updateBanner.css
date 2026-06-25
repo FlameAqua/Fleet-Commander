@@ -1,0 +1,64 @@
+.upd {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 1300;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  max-width: min(420px, 92vw);
+  padding: 0.6rem 0.8rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+  font-size: 0.85rem;
+  color: var(--text);
+}
+.upd--ready {
+  border-color: var(--accent);
+}
+.upd__msg {
+  flex: 1;
+}
+.upd__btn {
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 0.35rem 0.75rem;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.upd__btn:hover {
+  filter: brightness(1.06);
+}
+.upd__x {
+  border: none;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 0 0.15rem;
+}
+.upd__spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: upd-spin 0.8s linear infinite;
+  flex: none;
+}
+@keyframes upd-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .upd__spinner {
+    animation: none;
+  }
+}

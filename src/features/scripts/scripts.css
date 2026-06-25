@@ -147,6 +147,20 @@
   flex-direction: column;
   gap: 0.5rem;
 }
+/* In the library, the editor fills the column so its height matches the
+   script list beside it (no wasted space). Styling stays identical to the
+   paste editor — only the size differs. */
+.scripts__editor .se {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.scripts__editor .se .se__ta {
+  flex: 1;
+  min-height: 0;
+  resize: none;
+}
 .scripts__editor-head {
   display: flex;
   gap: 0.5rem;

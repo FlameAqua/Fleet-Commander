@@ -7,6 +7,8 @@ export interface PromptOptions {
   password?: boolean
   placeholder?: string
   confirmLabel?: string
+  /** Yes/No confirm — no input field; resolves 'ok' on confirm, null on cancel. */
+  confirm?: boolean
   /** When set, render a single-choice list instead of a text input. */
   options?: { value: string; label: string }[]
 }
@@ -49,12 +51,12 @@ export function PromptProvider({ children }: { children: ReactNode }) {
             onMouseDown={(e) => e.stopPropagation()}
             onSubmit={(e) => {
               e.preventDefault()
-              close(value)
+              close(opts.confirm ? 'ok' : value)
             }}
           >
             {opts.title && <h3 className="prompt__title">{opts.title}</h3>}
             <p className="prompt__msg">{opts.message}</p>
-            {opts.options?.length ? (
+            {opts.confirm ? null : opts.options?.length ? (
               <div className="prompt__choices">
                 {opts.options.map((o) => (
                   <label key={o.value} className="prompt__choice">

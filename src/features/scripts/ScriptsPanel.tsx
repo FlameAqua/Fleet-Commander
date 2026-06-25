@@ -30,9 +30,17 @@ interface ScriptsPanelProps {
   onActiveChange?: (name: string, content: string) => void
   /** Per-system variables from the loaded Compound CSV (for `$` autocomplete). */
   variables?: string[]
+  /** Interpreter selector (cmd icon) — forwarded to the embedded editor. */
+  interpreter?: 'auto' | 'routeros'
+  onInterpreterChange?: (i: 'auto' | 'routeros') => void
 }
 
-export function ScriptsPanel({ onActiveChange, variables = [] }: ScriptsPanelProps = {}) {
+export function ScriptsPanel({
+  onActiveChange,
+  variables = [],
+  interpreter,
+  onInterpreterChange,
+}: ScriptsPanelProps = {}) {
   const { dir, setDir } = useScriptsDir()
 
   const [scripts, setScripts] = useState<ScriptInfo[]>([])
@@ -227,6 +235,8 @@ export function ScriptsPanel({ onActiveChange, variables = [] }: ScriptsPanelPro
             onChange={setContent}
             variables={variables}
             placeholder={'#!/bin/bash\nset -e\necho "Hello from $(hostname)"'}
+            interpreter={interpreter}
+            onInterpreterChange={onInterpreterChange}
           />
         </div>
       </div>

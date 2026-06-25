@@ -34,6 +34,8 @@ function caretXY(ta: HTMLTextAreaElement, index: number): { left: number; top: n
   return { left, top }
 }
 
+type Interpreter = 'auto' | 'routeros'
+
 interface Props {
   value: string
   onChange: (v: string) => void
@@ -41,12 +43,24 @@ interface Props {
   variables: string[]
   placeholder?: string
   className?: string
+  /** When provided, a cmd icon (left of the `?`) lets the operator pick the interpreter. */
+  interpreter?: Interpreter
+  onInterpreterChange?: (i: Interpreter) => void
 }
 
 /** Script textarea with a `$`-triggered variable dropdown and a help hint. */
-export function ScriptEditor({ value, onChange, variables, placeholder, className }: Props) {
+export function ScriptEditor({
+  value,
+  onChange,
+  variables,
+  placeholder,
+  className,
+  interpreter = 'auto',
+  onInterpreterChange,
+}: Props) {
   const ref = useRef<HTMLTextAreaElement>(null)
   const [menu, setMenu] = useState<Menu | null>(null)
+  const [interpOpen, setInterpOpen] = useState(false)
 
   function refreshMenu(ta: HTMLTextAreaElement) {
     if (!variables.length) {
@@ -87,6 +101,48 @@ export function ScriptEditor({ value, onChange, variables, placeholder, classNam
 
   return (
     <div className={`se ${className ?? ''}`}>
+      {onInterpreterChange && (
+        <>
+          <button
+            type="button"
+            className={`se__cmd${interpreter === 'routeros' ? ' is-active' : ''}`}
+            tabIndex={-1}
+            title={`Interpreter: ${interpreter === 'routeros' ? 'RouterOS (MikroTik)' : 'Auto-detect (bash / sh)'}`}
+            onClick={() => setInterpOpen((o) => !o)}
+          >
+            <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true">
+              <rect x="2.5" y="4" width="19" height="16" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.7" />
+              <path d="M6 9 l3 2.6 -3 2.6" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+              <line x1="11.5" y1="15" x2="16" y2="15" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+            </svg>
+          </button>
+          {interpOpen && (
+            <>
+              <div className="se__interpback" onClick={() => setInterpOpen(false)} />
+              <ul className="se__interpmenu" role="menu">
+                <li>
+                  <button
+                    type="button"
+                    className={interpreter === 'auto' ? 'is-sel' : ''}
+                    onClick={() => { onInterpreterChange('auto'); setInterpOpen(false) }}
+                  >
+                    Auto-detect (bash / sh)
+                  </button>
+                </li>
+                <li>
+                  <button
+                    type="button"
+                    className={interpreter === 'routeros' ? 'is-sel' : ''}
+                    onClick={() => { onInterpreterChange('routeros'); setInterpOpen(false) }}
+                  >
+                    RouterOS (MikroTik)
+                  </button>
+                </li>
+              </ul>
+            </>
+          )}
+        </>
+      )}
       <button
         type="button"
         className="se__help"

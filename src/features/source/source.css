@@ -90,6 +90,11 @@
   color: var(--text);
   max-width: 240px;
 }
+.src-serverpick:disabled {
+  color: var(--muted);
+  opacity: 0.8;
+  cursor: default;
+}
 
 .src-filename {
   font-size: 0.82rem;

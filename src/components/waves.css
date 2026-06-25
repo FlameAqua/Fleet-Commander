@@ -16,6 +16,13 @@
 .waves__parallax > use {
   animation: fc-wave-move 18s cubic-bezier(0.55, 0.5, 0.45, 0.5) infinite;
 }
+/* Filler wave — same speed/phase-lock as w1 but half a wavelength offset, so
+   its crests stay parked in w1's troughs. Lighter, sits just behind w1. */
+.waves__w0 {
+  fill: rgba(120, 158, 255, 0.1);
+  animation-delay: -2s;
+  animation-duration: 13s;
+}
 .waves__w1 {
   fill: rgba(99, 140, 255, 0.16);
   animation-delay: -2s;
@@ -86,44 +93,55 @@
   height: 100%;
   transform-origin: 50% 80%;
 }
-
-/* Left → right ship */
-.ship--a {
-  bottom: 22px;
-  animation: fc-ship-ltr 52s linear infinite;
+/* Custom clip-art ship: keep aspect ratio and cap the rendered size. */
+.ship__bob.ship__art {
+  width: auto;
+  height: auto;
+  max-width: 60px;
+  max-height: 40px;
+  object-fit: contain;
 }
-.ship--a .ship__bob {
+
+/* Ships are parked offscreen and only cross when React adds `is-sailing`
+   (one pass). The gap between passes (and how many ships exist) is driven in
+   JS by the frequency setting; crossing speed stays constant per ship. */
+.ship--ltr {
+  transform: translateX(-30vw);
+}
+.ship--ltr.is-sailing {
+  animation-name: fc-ship-cross-ltr;
+  animation-timing-function: linear;
+  animation-iteration-count: 1;
+}
+.ship--ltr .ship__bob {
   animation: fc-ship-bob 4.5s ease-in-out infinite;
 }
-/* Right → left ship — flipped to face its direction, different cadence */
-.ship--b {
-  bottom: 27px;
-  animation: fc-ship-rtl 71s linear infinite;
-  animation-delay: -34s;
+/* Right → left ship — flipped to face its direction */
+.ship--rtl {
+  transform: translateX(130vw);
 }
-.ship--b .ship__bob {
+.ship--rtl.is-sailing {
+  animation-name: fc-ship-cross-rtl;
+  animation-timing-function: linear;
+  animation-iteration-count: 1;
+}
+.ship--rtl .ship__bob {
   animation: fc-ship-bob-flip 5.2s ease-in-out infinite;
 }
 
-@keyframes fc-ship-ltr {
-  0% {
+@keyframes fc-ship-cross-ltr {
+  from {
     transform: translateX(-12vw);
   }
-  46% {
-    transform: translateX(112vw);
-  }
-  100% {
+  to {
     transform: translateX(112vw);
   }
 }
-@keyframes fc-ship-rtl {
-  0% {
+@keyframes fc-ship-cross-rtl {
+  from {
     transform: translateX(112vw);
   }
-  48% {
-    transform: translateX(-14vw);
-  }
-  100% {
+  to {
     transform: translateX(-14vw);
   }
 }
@@ -150,9 +168,10 @@
   .waves__parallax > use {
     animation: none;
   }
-  .ship {
+  .ship,
+  .ship.is-sailing {
     animation: none;
-    transform: translateX(-40vw);
+    transform: translateX(-40vw); /* parked offscreen — no crossings */
   }
   .ship__bob {
     animation: none;

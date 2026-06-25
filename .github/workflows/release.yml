@@ -1,0 +1,65 @@
+name: CI / Release
+
+# CI on every push/PR to main (the "tests" gate). Pushing a version tag
+# (e.g. v1.0.0) additionally builds the installer and publishes a GitHub
+# Release — which the running app then auto-detects via electron-updater.
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Test & typecheck
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Lint (informational)
+        run: npm run lint
+        continue-on-error: true
+      - name: Typecheck + build renderer
+        run: npm run build
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Backend import/syntax check
+        run: python -m py_compile backend/app.py backend/deployer.py backend/bsm_paths.py
+
+  release:
+    name: Build & publish installer
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm ci
+      - name: Set up backend venv
+        shell: bash
+        run: |
+          python -m venv backend/.venv
+          backend/.venv/Scripts/python -m pip install --upgrade pip
+          backend/.venv/Scripts/python -m pip install -r backend/requirements.txt -r backend/requirements-build.txt
+      - name: Build renderer
+        run: npm run build
+      - name: Build backend sidecar (PyInstaller)
+        run: npm run build:backend
+      - name: Package & publish to GitHub Releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-builder --win --publish always

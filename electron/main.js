@@ -1,8 +1,11 @@
-import { app, BrowserWindow, Menu, ipcMain } from 'electron'
+import { app, BrowserWindow, Menu, ipcMain, shell } from 'electron'
+import electronUpdater from 'electron-updater'
 import { spawn } from 'child_process'
 import http from 'http'
 import path from 'path'
 import { fileURLToPath } from 'url'
+
+const { autoUpdater } = electronUpdater
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -178,6 +181,31 @@ function createWindow () {
 }
 
 // ---------------------------------------------------------------------------
+// Auto-update (electron-updater → GitHub Releases)
+// ---------------------------------------------------------------------------
+function sendUpdate (status) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('fc:update', status)
+  }
+}
+
+let updaterWired = false
+function setupAutoUpdate () {
+  if (isDev || updaterWired) return // updater only runs in packaged builds
+  updaterWired = true
+  autoUpdater.autoDownload = true
+  autoUpdater.autoInstallOnAppQuit = true
+  autoUpdater.allowPrerelease = true // we ship beta tags (e.g. v1.0.0-beta.2)
+  autoUpdater.on('checking-for-update', () => sendUpdate({ state: 'checking' }))
+  autoUpdater.on('update-available', (i) => sendUpdate({ state: 'available', version: i?.version }))
+  autoUpdater.on('update-not-available', () => sendUpdate({ state: 'none' }))
+  autoUpdater.on('download-progress', (p) =>
+    sendUpdate({ state: 'downloading', percent: Math.round(p?.percent ?? 0) }))
+  autoUpdater.on('update-downloaded', (i) => sendUpdate({ state: 'downloaded', version: i?.version }))
+  autoUpdater.on('error', (err) => sendUpdate({ state: 'error', message: String(err?.message || err) }))
+}
+
+// ---------------------------------------------------------------------------
 // Lifecycle
 // ---------------------------------------------------------------------------
 app.whenReady().then(async () => {
@@ -198,6 +226,9 @@ app.whenReady().then(async () => {
     // Still open the window so the renderer can show a connection error.
   }
   createWindow()
+  setupAutoUpdate()
+  // First check shortly after launch; the renderer can also trigger one.
+  if (!isDev) setTimeout(() => autoUpdater.checkForUpdates().catch((e) => console.error('[update]', e)), 4000)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -215,6 +246,30 @@ ipcMain.on('fc:win', (e, action) => {
   if (action === 'minimize') win.minimize()
   else if (action === 'maximize') win.isMaximized() ? win.unmaximize() : win.maximize()
   else if (action === 'close') win.close()
+})
+
+// Open external links (e.g. the GitHub link in Settings) in the OS browser.
+ipcMain.on('fc:open-external', (_e, url) => {
+  if (typeof url === 'string' && /^https?:\/\//i.test(url)) shell.openExternal(url)
+})
+
+// Open a local folder in the OS file manager. Done from the app process (not
+// the hidden Flask backend) so Explorer comes to the foreground instead of
+// opening silently behind the window.
+ipcMain.handle('fc:open-path', async (_e, p) => {
+  if (typeof p === 'string' && p) return shell.openPath(p)
+  return 'invalid path'
+})
+
+// Synchronous version lookup for the preload bridge.
+ipcMain.on('fc:app-version', (e) => { e.returnValue = app.getVersion() })
+
+// Auto-update controls driven from the renderer.
+ipcMain.on('fc:update:check', () => {
+  if (!isDev) autoUpdater.checkForUpdates().catch((err) => console.error('[update]', err))
+})
+ipcMain.on('fc:update:install', () => {
+  if (!isDev) autoUpdater.quitAndInstall()
 })
 
 app.on('before-quit', stopBackend)

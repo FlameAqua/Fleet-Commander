@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import sys
@@ -70,6 +71,63 @@ def default_csv_dir() -> str:
     path = data_path("csv")
     os.makedirs(path, exist_ok=True)
     return path
+
+
+def default_ships_dir() -> str:
+    # Operators can drop clip-art images here; the UI picks one at random as the
+    # little ship sailing across the water.
+    path = data_path("ships")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+# --- Persisted user settings (data-dir settings.json) ---------------------- #
+def _settings_path() -> str:
+    return data_path("settings.json")
+
+
+def load_settings() -> dict:
+    try:
+        with open(_settings_path(), "r", encoding="utf-8") as f:
+            d = json.load(f)
+            return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_settings(patch: dict) -> dict:
+    cur = load_settings()
+    for k, v in patch.items():
+        if v is None:
+            cur.pop(k, None)          # explicit None clears the override
+        else:
+            cur[k] = v
+    try:
+        with open(_settings_path(), "w", encoding="utf-8") as f:
+            json.dump(cur, f, indent=2)
+    except OSError:
+        pass
+    return cur
+
+
+def _override_dir(key: str, default: str) -> str:
+    """Return a persisted folder override if it still exists, else the default."""
+    p = (load_settings().get(key) or "").strip()
+    if p:
+        p = os.path.abspath(os.path.expanduser(p))
+        if os.path.isdir(p):
+            return p
+    return default
+
+
+def csv_dir() -> str:
+    """The active CSV library folder — operator override or the default."""
+    return _override_dir("csv_dir", default_csv_dir())
+
+
+def scripts_dir() -> str:
+    """The active scripts folder — operator override or the default."""
+    return _override_dir("scripts_dir", default_scripts_dir())
 
 
 def seed_default_scripts() -> None:

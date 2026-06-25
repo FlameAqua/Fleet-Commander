@@ -199,3 +199,78 @@ export async function openCsvFolder(): Promise<{ dir: string }> {
     await fetch(apiUrl('/api/open-csv-folder'), { method: 'POST' }),
   )
 }
+
+// --- App settings (folder overrides) -------------------------------------- //
+export interface AppSettings {
+  csv_dir: string
+  scripts_dir: string
+  csv_dir_custom: boolean
+  scripts_dir_custom: boolean
+  default_csv_dir: string
+  default_scripts_dir: string
+}
+
+export function getSettings(): Promise<AppSettings & { ok: boolean }> {
+  return apiGet<AppSettings & { ok: boolean }>('/api/settings')
+}
+
+function jsonPost(path: string, body: unknown): Promise<Response> {
+  return fetch(apiUrl(path), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+}
+
+export async function saveSettings(patch: {
+  csv_dir?: string | null
+  scripts_dir?: string | null
+}): Promise<AppSettings> {
+  return parseJson<AppSettings>(await jsonPost('/api/settings', patch))
+}
+
+/** Native OS folder picker. Returns the chosen path, or null if cancelled. */
+export async function pickFolder(title: string): Promise<string | null> {
+  const data = await parseJson<{ ok: true; path: string | null }>(
+    await jsonPost('/api/pick-folder', { title }),
+  )
+  return data.path
+}
+
+async function folderPath(which: 'csv' | 'scripts' | 'ships'): Promise<string> {
+  const data = await parseJson<{ ok: true; path: string }>(
+    await jsonPost('/api/folder-path', { which }),
+  )
+  return data.path
+}
+
+export async function openFolder(which: 'csv' | 'scripts' | 'ships'): Promise<void> {
+  // Prefer the Electron app process: a folder opened by the hidden Flask
+  // backend lands behind the window (Windows foreground rules), whereas the
+  // app — the foreground process on click — brings Explorer to the front.
+  if (window.electron?.openPath) {
+    const p = await folderPath(which)
+    if (p) {
+      await window.electron.openPath(p)
+      return
+    }
+  }
+  await parseJson<{ ok: true }>(await jsonPost('/api/open-folder', { which }))
+}
+
+// --- Customisable ship art ------------------------------------------------ //
+export function listShips(): Promise<{ ok: boolean; dir: string; ships: string[] }> {
+  return apiGet('/api/ships')
+}
+
+export function shipUrl(name: string): string {
+  return apiUrl(`/api/ship/${encodeURIComponent(name)}`)
+}
+
+export async function uploadShip(file: File): Promise<{ filename: string }> {
+  const fd = new FormData()
+  fd.append('ship', file)
+  return parseJson<{ ok: true; filename: string }>(
+    await fetch(apiUrl('/api/ship-upload'), { method: 'POST', body: fd }),
+  )
+}

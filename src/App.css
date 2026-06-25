@@ -8,22 +8,35 @@
 }
 
 .app__bar {
+  position: sticky;
+  top: 0;
+  z-index: 50; /* stays above the scrolling step cards (below modals) */
   display: flex;
   align-items: center;
   justify-content: space-between;
   height: 40px;
   padding: 0 0 0 1.25rem;
   border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--panel) 80%, transparent);
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   -webkit-app-region: drag; /* the bar is the draggable title bar */
 }
 
 .app__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
   font-weight: 600;
   color: var(--text-h);
   letter-spacing: -0.2px;
+}
+.app__logo {
+  height: 22px;
+  width: auto;
+  max-width: 40px;
+  object-fit: contain;
+  flex: none;
 }
 
 .app__baractions {
@@ -48,6 +61,9 @@
 }
 .app__theme:hover {
   background: rgba(127, 127, 127, 0.26);
+}
+.app__theme--off {
+  opacity: 0.4;
 }
 .app__offline {
   -webkit-app-region: no-drag;
@@ -99,6 +115,10 @@
     animation: none;
   }
 }
+/* Manual animations-off (e.g. over RDP): freeze the step entrance too. */
+:root[data-anim='off'] .step {
+  animation: none;
+}
 
 .step__title {
   display: flex;
@@ -134,9 +154,14 @@
 .step__nav {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: 1rem;
   margin-top: 1rem;
+}
+.step__navright {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
 }
 .step__hint {
   font-size: 0.85rem;

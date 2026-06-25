@@ -32,6 +32,9 @@ import { Aurora } from './components/Aurora'
 import { Clouds } from './components/Clouds'
 import { Waves } from './components/Waves'
 import { WindowControls } from './components/WindowControls'
+import { CsvGuide } from './components/CsvGuide'
+import { Settings, DEFAULT_ANIM, type AnimPrefs } from './components/Settings'
+import { UpdateBanner } from './components/UpdateBanner'
 import './App.css'
 
 type Theme = 'night' | 'day'
@@ -66,6 +69,26 @@ function App() {
       return 'night'
     }
   })
+  // Each decorative animation can be toggled independently (e.g. over RDP,
+  // where GPU compositing is limited and they render broken). Persisted as
+  // JSON per machine; merged with defaults so new keys turn on by default.
+  const [anim, setAnim] = useState<AnimPrefs>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('fc.anim') || '{}')
+      return { ...DEFAULT_ANIM, ...saved }
+    } catch {
+      return DEFAULT_ANIM
+    }
+  })
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [shipFreq, setShipFreq] = useState<number>(() => {
+    try {
+      const v = parseInt(localStorage.getItem('fc.shipFreq') || '', 10)
+      return Number.isFinite(v) ? Math.min(10, Math.max(1, v)) : 4
+    } catch {
+      return 4
+    }
+  })
   const [testHost, setTestHost] = useState<string | null>(null)
   const [step, setStep] = useState<Step>('source')
   // Per-mode source state so switching tabs doesn't wipe your selection.
@@ -96,6 +119,24 @@ function App() {
       /* ignore */
     }
   }, [theme])
+
+  useEffect(() => {
+    // Panel-transition toggle drives the CSS; persist the whole prefs object.
+    document.documentElement.dataset.anim = anim.panel ? 'on' : 'off'
+    try {
+      localStorage.setItem('fc.anim', JSON.stringify(anim))
+    } catch {
+      /* ignore */
+    }
+  }, [anim])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('fc.shipFreq', String(shipFreq))
+    } catch {
+      /* ignore */
+    }
+  }, [shipFreq])
 
   useEffect(() => {
     let cancelled = false
@@ -354,18 +395,30 @@ function App() {
       <Splash ready={health === 'ok'} />
       {theme === 'night' ? (
         <>
-          <Aurora />
-          <Stars />
+          {anim.aurora && <Aurora />}
+          {anim.stars && <Stars />}
         </>
       ) : (
-        <Clouds />
+        anim.clouds && <Clouds />
       )}
-      <Waves />
+      {anim.waves && <Waves frequency={shipFreq} />}
 
       <header className="app__bar">
-        <div className="app__brand">Fleet Commander</div>
+        <div className="app__brand">
+          <img className="app__logo" src="/fleet.ico" alt="" aria-hidden="true" />
+          Fleet Commander
+        </div>
         <div className="app__baractions">
           {health === 'down' && <div className="app__offline">⚠ Backend offline</div>}
+          <button
+            type="button"
+            className="app__theme"
+            onClick={() => setSettingsOpen(true)}
+            title="Settings"
+            aria-label="Open settings"
+          >
+            ⚙
+          </button>
           <button
             type="button"
             className="app__theme"
@@ -387,12 +440,15 @@ function App() {
             </h2>
             <SourcePanel source={source} onChange={setSource} onModeChange={onModeChange} testHost={testHost} />
             <div className="step__nav">
-              <span className="step__hint">
-                {canProceed ? `Ready — working on ${systemsLabel}.` : 'Select at least one system to continue.'}
-              </span>
-              <button type="button" className="run__btn run__btn--primary" disabled={!canProceed} onClick={() => void continueToActions()}>
-                Continue to actions →
-              </button>
+              <CsvGuide />
+              <div className="step__navright">
+                <span className="step__hint">
+                  {canProceed ? `Ready — working on ${systemsLabel}.` : 'Select at least one system to continue.'}
+                </span>
+                <button type="button" className="run__btn run__btn--primary" disabled={!canProceed} onClick={() => void continueToActions()}>
+                  Continue to actions →
+                </button>
+              </div>
             </div>
           </section>
         ) : (
@@ -447,6 +503,16 @@ function App() {
           </section>
         )}
       </main>
+
+      <Settings
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        anim={anim}
+        onAnimChange={setAnim}
+        shipFreq={shipFreq}
+        onShipFreqChange={setShipFreq}
+      />
+      <UpdateBanner />
 
       {approval && (
         <div className="confirm__overlay" onMouseDown={() => setApproval(null)}>

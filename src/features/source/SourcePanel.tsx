@@ -8,7 +8,7 @@ import {
   encryptCsvToFolder,
   getServerCsv,
   listCsvFiles,
-  openCsvFolder,
+  openFolder,
   type CsvFileInfo,
 } from '../../api'
 import { buildCanonicalKeepass, type HostEntry } from '../../lib/csv'
@@ -193,38 +193,45 @@ function CompoundEditor({
     }
   }
 
-  function removeFile() {
+  async function removeFile() {
     // Only confirm for plaintext CSVs — an .enc-sourced load has no plaintext
     // passwords sitting around, so clearing it is low-stakes.
     if (source.file && !source.file.fromEncrypted) {
-      if (!window.confirm('Remove the loaded plaintext CSV (clears its passwords from the app)?')) return
+      const ok = await prompt({
+        title: 'Remove CSV',
+        message: 'Remove the loaded plaintext CSV? This clears its passwords from the app.',
+        confirm: true,
+        confirmLabel: 'Remove',
+      })
+      if (ok === null) return
     }
     onChange({ ...source, file: null })
     notify(null)
   }
 
+  const folderEmpty = serverFiles.length === 0
+
   return (
     <div className="src-pane">
       <div className="src-row">
-        {serverFiles.length > 0 && (
-          <select
-            className="src-serverpick"
-            value=""
-            onChange={(e) => {
-              const v = e.target.value
-              e.target.value = ''
-              if (v) void loadServerFile(v)
-            }}
-          >
-            <option value="">Import from csv folder…</option>
-            {serverFiles.map((f) => (
-              <option key={f.name} value={f.name}>
-                {f.name}
-                {f.encrypted ? ' 🔒' : ''}
-              </option>
-            ))}
-          </select>
-        )}
+        <select
+          className="src-serverpick"
+          value=""
+          disabled={folderEmpty}
+          onChange={(e) => {
+            const v = e.target.value
+            e.target.value = ''
+            if (v) void loadServerFile(v)
+          }}
+        >
+          <option value="">{folderEmpty ? 'Folder is empty… Import a file…' : 'Import from csv folder…'}</option>
+          {serverFiles.map((f) => (
+            <option key={f.name} value={f.name}>
+              {f.name}
+              {f.encrypted ? ' 🔒' : ''}
+            </option>
+          ))}
+        </select>
         <label className="src-filebtn">
           {/* clear on click so re-picking the SAME file (e.g. after a wrong
               decrypt password) still fires onChange */}
@@ -236,14 +243,14 @@ function CompoundEditor({
             }}
             onChange={(e) => void onFile(e.target.files?.[0] ?? null)}
           />
-          {serverFiles.length > 0 ? 'Import your own…' : 'Choose CSV / .enc…'}
+          Import your own…
         </label>
         <span className="src-filename">
           {source.file ? source.file.name : 'No file selected'}
           {source.file?.fromEncrypted && <span className="src-badge">decrypted</span>}
         </span>
         {source.file && (
-          <button type="button" className="src-remove" title="Remove loaded file" onClick={removeFile}>
+          <button type="button" className="src-remove" title="Remove loaded file" onClick={() => void removeFile()}>
             ✕
           </button>
         )}
@@ -419,10 +426,10 @@ function CsvToolsMenu({ onNotice, onChanged }: { onNotice: Notify; onChanged: ()
     }
   }
 
-  async function openFolder() {
+  async function onOpenFolder() {
     setOpen(false)
     try {
-      await openCsvFolder()
+      await openFolder('csv')
     } catch (e) {
       onNotice(errMsg(e))
     }
@@ -453,7 +460,7 @@ function CsvToolsMenu({ onNotice, onChanged }: { onNotice: Notify; onChanged: ()
               <button type="button" role="menuitem" onClick={() => { setOpen(false); decInput.current?.click() }}>
                 Decrypt a CSV…
               </button>
-              <button type="button" role="menuitem" onClick={openFolder}>
+              <button type="button" role="menuitem" onClick={onOpenFolder}>
                 Open CSV folder
               </button>
             </div>
