@@ -289,8 +289,17 @@ ipcMain.handle('fc:open-path', async (_e, p) => {
 ipcMain.on('fc:app-version', (e) => { e.returnValue = app.getVersion() })
 
 // Auto-update controls driven from the renderer.
-ipcMain.on('fc:update:check', () => {
-  if (!isDev) autoUpdater.checkForUpdates().catch((err) => console.error('[update]', err))
+ipcMain.on('fc:update:check', (e) => {
+  if (isDev) {
+    // The updater only runs in a packaged build; tell the tester rather than
+    // leaving the UI spinning on "checking…".
+    e.sender.send('fc:update', {
+      state: 'error',
+      message: 'Updates only run in the installed build (not in dev).',
+    })
+    return
+  }
+  autoUpdater.checkForUpdates().catch((err) => console.error('[update]', err))
 })
 ipcMain.on('fc:update:install', () => {
   if (!isDev) autoUpdater.quitAndInstall()

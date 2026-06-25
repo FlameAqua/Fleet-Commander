@@ -42,6 +42,24 @@ function errMsg(e: unknown): string {
   return e instanceof ApiError ? e.message : e instanceof Error ? e.message : String(e)
 }
 
+function updateText(s: UpdateStatus | null): string {
+  if (!s) return 'Click to check for a new version.'
+  switch (s.state) {
+    case 'checking':
+      return 'Checking for updates…'
+    case 'none':
+      return "You're on the latest version."
+    case 'available':
+      return `Update ${s.version ?? ''} found — downloading…`
+    case 'downloading':
+      return `Downloading update… ${s.percent ?? 0}%`
+    case 'downloaded':
+      return `Version ${s.version ?? ''} downloaded — ready to install.`
+    case 'error':
+      return `Update check failed: ${s.message ?? 'unknown error'}`
+  }
+}
+
 interface Props {
   open: boolean
   onClose: () => void
@@ -58,6 +76,12 @@ export function Settings({ open, onClose, anim, onAnimChange, shipFreq, onShipFr
   const [ships, setShips] = useState<string[]>([])
   const [shipErr, setShipErr] = useState<string | null>(null)
   const shipInput = useRef<HTMLInputElement>(null)
+  const [upd, setUpd] = useState<UpdateStatus | null>(null)
+
+  useEffect(() => {
+    if (!open) return
+    return window.electron?.onUpdateStatus?.(setUpd)
+  }, [open])
 
   useEffect(() => {
     if (!open) return
@@ -226,6 +250,37 @@ export function Settings({ open, onClose, anim, onAnimChange, shipFreq, onShipFr
           </label>
           {shipErr && <div className="settings__err">{shipErr}</div>}
         </section>
+
+        {window.electron?.onUpdateStatus && (
+          <section className="settings__section">
+            <h4>Updates</h4>
+            <p className={`settings__hint${upd?.state === 'error' ? ' settings__upderr' : ''}`}>
+              {updateText(upd)}
+            </p>
+            <div className="settings__folderbtns">
+              <button
+                type="button"
+                className="settings__btn"
+                disabled={upd?.state === 'checking' || upd?.state === 'downloading'}
+                onClick={() => {
+                  setUpd({ state: 'checking' })
+                  window.electron?.checkForUpdate?.()
+                }}
+              >
+                Check for updates
+              </button>
+              {upd?.state === 'downloaded' && (
+                <button
+                  type="button"
+                  className="settings__btn"
+                  onClick={() => window.electron?.installUpdate?.()}
+                >
+                  Restart &amp; install
+                </button>
+              )}
+            </div>
+          </section>
+        )}
 
         <section className="settings__section">
           <h4>Release notes</h4>

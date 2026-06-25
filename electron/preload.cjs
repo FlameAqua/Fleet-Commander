@@ -23,8 +23,12 @@ contextBridge.exposeInMainWorld('electron', {
   // Open a local folder in the OS file manager (foregrounded).
   openPath: (path) => ipcRenderer.invoke('fc:open-path', path),
   appVersion,
-  // Auto-update bridge.
-  onUpdateStatus: (cb) => ipcRenderer.on('fc:update', (_e, status) => cb(status)),
+  // Auto-update bridge. onUpdateStatus returns an unsubscribe function.
+  onUpdateStatus: (cb) => {
+    const handler = (_e, status) => cb(status)
+    ipcRenderer.on('fc:update', handler)
+    return () => ipcRenderer.removeListener('fc:update', handler)
+  },
   checkForUpdate: () => ipcRenderer.send('fc:update:check'),
   installUpdate: () => ipcRenderer.send('fc:update:install'),
 })

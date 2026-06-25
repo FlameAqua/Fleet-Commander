@@ -68,6 +68,9 @@
   font-size: 0.8rem;
   color: var(--muted);
 }
+.settings__upderr {
+  color: var(--error-text);
+}
 .settings__toggle {
   display: flex;
   align-items: center;

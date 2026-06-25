@@ -29,7 +29,8 @@ interface FleetElectronBridge {
   /** The packaged app version (app.getVersion()). */
   appVersion?: string
   // --- auto-update (electron-updater) ---
-  onUpdateStatus?: (cb: (status: UpdateStatus) => void) => void
+  /** Subscribe to update status; returns an unsubscribe function. */
+  onUpdateStatus?: (cb: (status: UpdateStatus) => void) => () => void
   checkForUpdate?: () => void
   /** Quit and install a downloaded update. */
   installUpdate?: () => void
