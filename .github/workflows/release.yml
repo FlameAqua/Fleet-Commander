@@ -62,6 +62,18 @@ jobs:
         run: npm run build
       - name: Build backend sidecar (PyInstaller)
         run: npm run build:backend
+      # Create the release up front so electron-builder only UPLOADS to it.
+      # Otherwise its concurrent .exe/.blockmap uploads each try to create the
+      # release, racing into duplicate releases with a missing installer.
+      - name: Ensure the release exists
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if ! gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+              --prerelease --title "$GITHUB_REF_NAME" --notes "Fleet Commander $GITHUB_REF_NAME"
+          fi
       - name: Package & publish to GitHub Releases
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
