@@ -18,5 +18,15 @@ export default defineConfig([
     languageOptions: {
       globals: globals.browser,
     },
+    rules: {
+      // Dev-only Fast Refresh hint — co-locating a type/constant with a
+      // component is fine here and doesn't affect the build. Keep as a warning.
+      'react-refresh/only-export-components': 'warn',
+      // React-Compiler-oriented rules (react-hooks 6+) that flag valid patterns
+      // we use deliberately (latest-ref assignment in render; setState in a
+      // data-fetch effect). Keep visible as warnings rather than blocking CI.
+      'react-hooks/set-state-in-effect': 'warn',
+      'react-hooks/refs': 'warn',
+    },
   },
 ])

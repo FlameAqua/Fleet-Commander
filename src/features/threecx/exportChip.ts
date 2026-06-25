@@ -58,7 +58,7 @@ export function extractExport(output: string, hostLabel: string): ExportResult |
       .map(([k, v]) => `${k}:${v.items?.length ?? 0}`)
       .join('  ')
   } catch {
-    summary = ''
+    // malformed payload — leave the summary empty
   }
 
   return { cleaned, data: { jsonText, filename, summary } }

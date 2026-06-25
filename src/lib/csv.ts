@@ -90,7 +90,7 @@ export function normaliseSshTarget(rawUrl: string): string | null {
   const s = String(rawUrl || '').trim()
   if (!s) return null
   if (/^ssh:\/\//i.test(s)) return s
-  if (/^[a-z][a-z0-9+.\-]*:\/\//i.test(s)) return null
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(s)) return null
   return 'ssh://' + s
 }
 
