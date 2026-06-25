@@ -1,7 +1,8 @@
 export const GITHUB_URL = 'https://github.com/FlameAqua/Fleet-Commander'
 
-/** App version shown in Settings. Keep in step with package.json "version". */
-export const APP_VERSION = '1.0.0-beta.1'
+/** Fallback version shown in Settings when the Electron bridge isn't present
+ *  (dev/browser). In the packaged app the real app.getVersion() is used. */
+export const APP_VERSION = '1.0.0-beta.2'
 
 export interface ReleaseNote {
   version: string

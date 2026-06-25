@@ -245,7 +245,7 @@ export function Settings({ open, onClose, anim, onAnimChange, shipFreq, onShipFr
         </section>
 
         <div className="settings__foot">
-          <span className="settings__ver">Fleet Commander {APP_VERSION}</span>
+          <span className="settings__ver">Fleet Commander {window.electron?.appVersion || APP_VERSION}</span>
           <button type="button" className="settings__link" onClick={() => openExternal(GITHUB_URL)}>
             GitHub ↗
           </button>
