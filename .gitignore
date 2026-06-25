@@ -1,3 +1,6 @@
+# Embedded auto-update token (written by CI from a secret; never commit)
+electron/update-token.txt
+
 # Logs
 logs
 *.log

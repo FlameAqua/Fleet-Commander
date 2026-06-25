@@ -57,7 +57,8 @@
         "provider": "github",
         "owner": "FlameAqua",
         "repo": "Fleet-Commander",
-        "releaseType": "prerelease"
+        "releaseType": "prerelease",
+        "private": true
       }
     ],
     "directories": {

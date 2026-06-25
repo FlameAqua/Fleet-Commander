@@ -62,6 +62,9 @@ jobs:
         run: npm run build
       - name: Build backend sidecar (PyInstaller)
         run: npm run build:backend
+      - name: Embed auto-update token
+        shell: bash
+        run: printf '%s' "${{ secrets.UPDATE_TOKEN }}" > electron/update-token.txt
       # Create the release up front so electron-builder only UPLOADS to it.
       # Otherwise its concurrent .exe/.blockmap uploads each try to create the
       # release, racing into duplicate releases with a missing installer.

@@ -1,6 +1,7 @@
 import { app, BrowserWindow, Menu, ipcMain, shell } from 'electron'
 import electronUpdater from 'electron-updater'
 import { spawn } from 'child_process'
+import fs from 'node:fs'
 import http from 'http'
 import path from 'path'
 import { fileURLToPath } from 'url'
@@ -9,6 +10,15 @@ const { autoUpdater } = electronUpdater
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
+
+// Read-only GitHub token used to read releases from the PRIVATE repo. CI writes
+// this file from a secret at build time; it's gitignored and absent in dev.
+let UPDATE_TOKEN = ''
+try {
+  UPDATE_TOKEN = fs.readFileSync(path.join(__dirname, 'update-token.txt'), 'utf8').trim()
+} catch {
+  UPDATE_TOKEN = ''
+}
 
 // ---------------------------------------------------------------------------
 // Config
@@ -196,6 +206,20 @@ function setupAutoUpdate () {
   autoUpdater.autoDownload = true
   autoUpdater.autoInstallOnAppQuit = true
   autoUpdater.allowPrerelease = true // we ship beta tags (e.g. v1.0.0-beta.2)
+  // Authenticate to the private repo so the updater can read releases/assets.
+  if (UPDATE_TOKEN) {
+    try {
+      autoUpdater.setFeedURL({
+        provider: 'github',
+        owner: 'FlameAqua',
+        repo: 'Fleet-Commander',
+        private: true,
+        token: UPDATE_TOKEN,
+      })
+    } catch (err) {
+      console.error('[update] setFeedURL failed:', err)
+    }
+  }
   autoUpdater.on('checking-for-update', () => sendUpdate({ state: 'checking' }))
   autoUpdater.on('update-available', (i) => sendUpdate({ state: 'available', version: i?.version }))
   autoUpdater.on('update-not-available', () => sendUpdate({ state: 'none' }))
