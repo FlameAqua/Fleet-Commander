@@ -20,7 +20,7 @@ export interface CustomScriptState {
 
 export function emptyCustomScript(): CustomScriptState {
   return {
-    source: 'library',
+    source: 'paste',
     library: { name: '', content: '' },
     paste: '',
     upload: { name: '', content: '' },
@@ -53,8 +53,8 @@ export function resolveCustomScript(cs: CustomScriptState): CustomScriptArgs | n
 }
 
 const SOURCES: { id: ScriptSource; label: string }[] = [
+  { id: 'paste', label: 'Write your own' },
   { id: 'library', label: 'Use from Library' },
-  { id: 'paste', label: 'Write Yourself' },
   { id: 'upload', label: 'Import Script' },
 ]
 

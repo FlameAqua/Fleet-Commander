@@ -188,6 +188,21 @@ function createWindow () {
   mainWindow.webContents.once('did-finish-load', reveal)
   setTimeout(reveal, 4000)
   mainWindow.on('closed', () => { mainWindow = null })
+
+  // Basic right-click context menu (Cut / Copy / Paste / Select All) — Electron
+  // has none by default, so text fields felt broken without it.
+  mainWindow.webContents.on('context-menu', (_e, params) => {
+    const { editFlags, isEditable, selectionText } = params
+    const hasSelection = !!selectionText
+    const menu = Menu.buildFromTemplate([
+      { role: 'cut', enabled: isEditable && editFlags.canCut },
+      { role: 'copy', enabled: editFlags.canCopy && hasSelection },
+      { role: 'paste', enabled: isEditable && editFlags.canPaste },
+      { type: 'separator' },
+      { role: 'selectAll', enabled: editFlags.canSelectAll },
+    ])
+    menu.popup({ window: mainWindow })
+  })
 }
 
 // ---------------------------------------------------------------------------

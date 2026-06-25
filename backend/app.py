@@ -739,15 +739,26 @@ def _open_in_file_manager(d: str):
 
 _SHIP_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"}
 _MAX_SHIP_BYTES = 3 * 1024 * 1024  # 3 MB per clip-art image
-_SHIP_BASE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._ -]{0,79}$")
 
 
-def _sanitize_ship_name(name: str) -> str:
+def _safe_ship_basename(name: str) -> str:
+    """Basename of an existing ship file — accepts any name (incl. odd chars)
+    dropped directly in the folder. Path traversal is blocked by basename;
+    only the extension is constrained."""
     n = os.path.basename((name or "").strip())
-    base, ext = os.path.splitext(n)
-    if ext.lower() not in _SHIP_EXTS or not _SHIP_BASE_RE.match(base):
+    if os.path.splitext(n)[1].lower() not in _SHIP_EXTS:
         return ""
     return n
+
+
+def _sanitize_for_save(filename: str) -> str:
+    """Turn an arbitrary upload filename into a safe stored name, preserving
+    the (validated) extension. Special characters → '_'."""
+    base, ext = os.path.splitext(os.path.basename((filename or "").strip()))
+    if ext.lower() not in _SHIP_EXTS:
+        return ""
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", base).strip("._-")[:60] or "ship"
+    return safe + ext.lower()
 
 
 @app.route("/api/ships")
@@ -768,7 +779,7 @@ def list_ships():
 @app.route("/api/ship/<path:name>")
 def get_ship(name):
     """Serve a ship clip-art image by name."""
-    safe = _sanitize_ship_name(name)
+    safe = _safe_ship_basename(name)
     if not safe:
         return jsonify({"ok": False, "error": "invalid file name"}), 400
     d = bsm_paths.default_ships_dir()
@@ -779,26 +790,51 @@ def get_ship(name):
 
 @app.route("/api/ship-upload", methods=["POST"])
 def upload_ship():
-    """Save an uploaded clip-art image into the ships folder."""
+    """Save an uploaded clip-art image into the ships folder. The filename is
+    sanitised (special characters supported), uniquified, and the safe stored
+    name is returned."""
     f = request.files.get("ship")
     if not f or not f.filename:
         return jsonify({"ok": False, "error": "No image uploaded."}), 400
-    safe = _sanitize_ship_name(f.filename)
-    if not safe:
+    name = _sanitize_for_save(f.filename)
+    if not name:
         return jsonify({
             "ok": False,
-            "error": "Use a PNG / JPG / GIF / SVG / WEBP image with a simple name.",
+            "error": "Use a PNG / JPG / GIF / SVG / WEBP image.",
         }), 400
     data = f.read()
     if len(data) > _MAX_SHIP_BYTES:
         return jsonify({"ok": False, "error": "Image too large (max 3 MB)."}), 400
     d = bsm_paths.default_ships_dir()
+    os.makedirs(d, exist_ok=True)
+    # Uniquify so a new upload never silently overwrites an existing image.
+    base, ext = os.path.splitext(name)
+    final, n = name, 1
+    while os.path.exists(os.path.join(d, final)):
+        n += 1
+        final = f"{base}-{n}{ext}"
     try:
-        with open(os.path.join(d, safe), "wb") as out:
+        with open(os.path.join(d, final), "wb") as out:
             out.write(data)
     except OSError as e:
         return jsonify({"ok": False, "error": str(e)}), 500
-    return jsonify({"ok": True, "filename": safe})
+    return jsonify({"ok": True, "filename": final})
+
+
+@app.route("/api/ship-delete", methods=["POST"])
+def delete_ship():
+    """Remove a clip-art image from the ships folder."""
+    name = (request.get_json(silent=True) or {}).get("name", "")
+    safe = _safe_ship_basename(name)
+    if not safe:
+        return jsonify({"ok": False, "error": "invalid file name"}), 400
+    path = os.path.join(bsm_paths.default_ships_dir(), safe)
+    try:
+        if os.path.isfile(path):
+            os.remove(path)
+    except OSError as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+    return jsonify({"ok": True, "removed": safe})
 
 
 def _folder_for(which: str) -> str:
@@ -976,6 +1012,95 @@ def _event(obj: Dict) -> str:
     return json.dumps(obj, ensure_ascii=False) + "\n"
 
 
+def _resolve_targets_creds(mode):
+    """
+    Parse targets + per-host credentials from the current request, shared by
+    /api/deploy and /api/auth-check. Returns
+    ``(targets, creds, parse_errors, fatal)`` where *fatal* is a user-facing
+    string when the request is unusable (missing files / bad test host), else
+    None. Mirrors the source modes: Test host, combined KeePass CSV, or the
+    SSH-URL CSV + Password CSV pair (with the fallback-hosts filter applied).
+    """
+    targets: List[Target] = []
+    creds: Dict[str, str] = {}
+    parse_errors: List[str] = []
+
+    kp_file = request.files.get("keepass_csv")
+    have_keepass = bool(kp_file and kp_file.filename)
+
+    if mode == "test":
+        try:
+            test_target = deployer.parse_ssh_url(deployer.TEST_HOST)
+        except ValueError as e:
+            return [], {}, [], f"bad test host: {e}"
+        targets = [test_target]
+        test_pw = request.form.get("test_password", "")
+        if have_keepass:
+            _, kp_creds, kp_errs = deployer.load_keepass_csv(kp_file.read())
+            parse_errors += kp_errs
+            if test_target.label in kp_creds:
+                creds[test_target.label] = kp_creds[test_target.label]
+        elif request.files.get("pass_csv") and request.files["pass_csv"].filename:
+            m, errs = deployer.load_credentials(request.files["pass_csv"].read(), targets)
+            parse_errors += errs
+            creds.update(m)
+        if test_pw:
+            creds[test_target.label] = test_pw
+        return targets, creds, parse_errors, None
+
+    if have_keepass:
+        targets, creds, kerrs = deployer.load_keepass_csv(kp_file.read())
+        parse_errors += kerrs
+    else:
+        ssh_file = request.files.get("ssh_csv")
+        pass_file = request.files.get("pass_csv")
+        if not ssh_file or not ssh_file.filename:
+            return [], {}, [], "Upload a KeePass CSV, or an SSH URL CSV + Password CSV"
+        if not pass_file or not pass_file.filename:
+            return [], {}, [], "Password CSV is required (or upload a combined KeePass CSV instead)"
+        targets, terrs = deployer.load_targets(ssh_file.read())
+        parse_errors += terrs
+        creds, cerrs = deployer.load_credentials(pass_file.read(), targets)
+        parse_errors += cerrs
+
+    if mode == "fallback":
+        try:
+            wanted = set(json.loads(request.form.get("fallback_hosts") or "[]"))
+        except json.JSONDecodeError:
+            wanted = set()
+        if wanted:
+            targets = [t for t in targets if t.label in wanted]
+
+    return targets, creds, parse_errors, None
+
+
+@app.route("/api/auth-check", methods=["POST"])
+def auth_check():
+    """
+    Connect-only SSH auth test for the selected systems. Same multipart form as
+    /api/deploy (mode + CSVs + test_password). Returns per-host pass/fail so the
+    operator can verify credentials before preparing or running an action.
+    """
+    mode = (request.form.get("mode") or "universal").strip()
+    cfg = _build_config(request.form)
+    targets, creds, parse_errors, fatal = _resolve_targets_creds(mode)
+    if fatal:
+        return jsonify({"ok": False, "error": fatal}), 400
+    if not targets:
+        return jsonify({"ok": False, "error": "No systems found. " + " | ".join(parse_errors)}), 400
+
+    def _one(t):
+        ok, err = deployer.check_auth(t, creds.get(t.label, ""), cfg)
+        return {"label": t.label, "ok": ok, "error": err}
+
+    results: List[dict] = []
+    with ThreadPoolExecutor(max_workers=min(10, len(targets))) as pool:
+        results = list(pool.map(_one, targets))
+
+    passed = sum(1 for r in results if r["ok"])
+    return jsonify({"ok": True, "results": results, "passed": passed, "total": len(results)})
+
+
 @app.route("/api/deploy", methods=["POST"])
 def deploy():
     """
@@ -997,66 +1122,10 @@ def deploy():
     cfg = _build_config(request.form)
 
     # ---- Resolve targets + credentials ---------------------------------- #
-    targets: List[Target] = []
-    creds: Dict[str, str] = {}
-    parse_errors: List[str] = []
-
-    kp_file = request.files.get("keepass_csv")
-    have_keepass = bool(kp_file and kp_file.filename)
-
-    if mode == "test":
-        try:
-            test_target = deployer.parse_ssh_url(deployer.TEST_HOST)
-        except ValueError as e:
-            return Response(_event({"type": "fatal", "message": f"bad test host: {e}"}),
-                            mimetype="application/x-ndjson")
-        targets = [test_target]
-        # Test host password: prefer the combined KeePass CSV, then a separate
-        # password CSV, then an explicit field typed by the user.
-        test_pw = request.form.get("test_password", "")
-        if have_keepass:
-            _, kp_creds, kp_errs = deployer.load_keepass_csv(kp_file.read())
-            parse_errors += kp_errs
-            if test_target.label in kp_creds:
-                creds[test_target.label] = kp_creds[test_target.label]
-        elif request.files.get("pass_csv") and request.files["pass_csv"].filename:
-            m, errs = deployer.load_credentials(request.files["pass_csv"].read(), targets)
-            parse_errors += errs
-            creds.update(m)
-        if test_pw:
-            creds[test_target.label] = test_pw
-    elif have_keepass:
-        targets, creds, kerrs = deployer.load_keepass_csv(kp_file.read())
-        parse_errors += kerrs
-
-        if mode == "fallback":
-            try:
-                wanted = set(json.loads(request.form.get("fallback_hosts") or "[]"))
-            except json.JSONDecodeError:
-                wanted = set()
-            if wanted:
-                targets = [t for t in targets if t.label in wanted]
-    else:
-        ssh_file = request.files.get("ssh_csv")
-        pass_file = request.files.get("pass_csv")
-        if not ssh_file or not ssh_file.filename:
-            return Response(_event({"type": "fatal", "message": "Upload a KeePass CSV, or an SSH URL CSV + Password CSV"}),
-                            mimetype="application/x-ndjson")
-        if not pass_file or not pass_file.filename:
-            return Response(_event({"type": "fatal", "message": "Password CSV is required (or upload a combined KeePass CSV instead)"}),
-                            mimetype="application/x-ndjson")
-        targets, terrs = deployer.load_targets(ssh_file.read())
-        parse_errors += terrs
-        creds, cerrs = deployer.load_credentials(pass_file.read(), targets)
-        parse_errors += cerrs
-
-        if mode == "fallback":
-            try:
-                wanted = set(json.loads(request.form.get("fallback_hosts") or "[]"))
-            except json.JSONDecodeError:
-                wanted = set()
-            if wanted:
-                targets = [t for t in targets if t.label in wanted]
+    targets, creds, parse_errors, fatal = _resolve_targets_creds(mode)
+    if fatal:
+        return Response(_event({"type": "fatal", "message": fatal}),
+                        mimetype="application/x-ndjson")
 
     if not targets:
         return Response(

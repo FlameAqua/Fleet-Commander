@@ -11,7 +11,7 @@ import {
   openFolder,
   type CsvFileInfo,
 } from '../../api'
-import { buildCanonicalKeepass, type HostEntry } from '../../lib/csv'
+import { buildCanonicalKeepass, canonicalLabel, normaliseSshTarget, type HostEntry } from '../../lib/csv'
 import { downloadBlob, readFileText } from '../../lib/file'
 import {
   type CompoundSource,
@@ -496,6 +496,19 @@ function CsvToolsMenu({ onNotice, onChanged }: { onNotice: Notify; onChanged: ()
 // --------------------------------------------------------------------------
 // Manual entry
 // --------------------------------------------------------------------------
+/** 'empty' | 'valid' | 'invalid' for a manually-typed SSH URL / host / IP. */
+function manualUrlState(url: string): 'empty' | 'valid' | 'invalid' {
+  const u = url.trim()
+  if (!u) return 'empty'
+  const norm = normaliseSshTarget(u)
+  if (!norm) return 'invalid'
+  const label = canonicalLabel(norm) // ssh://user@host:port, or '' if unparseable
+  if (!label) return 'invalid'
+  // Sanity-check the host is a plausible hostname or IPv4 (not exotic chars).
+  const host = /^ssh:\/\/[^@]+@([^:]+):\d+$/.exec(label)?.[1] ?? ''
+  return /^[a-z0-9_]([a-z0-9_.-]*[a-z0-9_])?$/i.test(host) ? 'valid' : 'invalid'
+}
+
 function ManualEditor({
   source,
   onChange,
@@ -515,42 +528,56 @@ function ManualEditor({
     onChange({ ...source, rows: rows.length ? rows : [{ url: '', user: '', password: '' }] })
   }
 
+  const invalidCount = source.rows.filter((r) => manualUrlState(r.url) === 'invalid').length
+
   return (
     <div className="src-pane">
-      {source.rows.map((row, i) => (
-        <div className="src-manualrow" key={i}>
-          <input
-            type="text"
-            className="src-manualrow__url"
-            placeholder="ssh://root@host.example  or  10.0.0.5"
-            value={row.url}
-            onChange={(e) => update(i, { url: e.target.value })}
-            spellCheck={false}
-          />
-          <input
-            type="text"
-            className="src-manualrow__user"
-            placeholder="root"
-            value={row.user}
-            onChange={(e) => update(i, { user: e.target.value })}
-            spellCheck={false}
-          />
-          <input
-            type="password"
-            className="src-manualrow__pw"
-            placeholder="password"
-            autoComplete="off"
-            value={row.password}
-            onChange={(e) => update(i, { password: e.target.value })}
-          />
-          <button type="button" className="src-manualrow__del" onClick={() => remove(i)} title="Remove row">
-            ✕
-          </button>
-        </div>
-      ))}
+      {source.rows.map((row, i) => {
+        const urlState = manualUrlState(row.url)
+        return (
+          <div className="src-manualrow" key={i}>
+            <input
+              type="text"
+              className={`src-manualrow__url${urlState === 'invalid' ? ' is-invalid' : ''}`}
+              placeholder="ssh://root@host.example  or  10.0.0.5"
+              value={row.url}
+              onChange={(e) => update(i, { url: e.target.value })}
+              spellCheck={false}
+              aria-invalid={urlState === 'invalid'}
+              title={urlState === 'invalid' ? 'Not a valid SSH URL, host, or IP' : undefined}
+            />
+            <input
+              type="text"
+              className="src-manualrow__user"
+              placeholder="root"
+              value={row.user}
+              onChange={(e) => update(i, { user: e.target.value })}
+              spellCheck={false}
+            />
+            <input
+              type="password"
+              className="src-manualrow__pw"
+              placeholder="password"
+              autoComplete="off"
+              value={row.password}
+              onChange={(e) => update(i, { password: e.target.value })}
+            />
+            <button type="button" className="src-manualrow__del" onClick={() => remove(i)} title="Remove row">
+              ✕
+            </button>
+          </div>
+        )
+      })}
       <button type="button" className="src-addrow" onClick={add}>
         + Add host
       </button>
+      {invalidCount > 0 && (
+        <div className="src-manual-hint">
+          ⚠ {invalidCount} {invalidCount === 1 ? 'entry isn’t' : 'entries aren’t'} a valid SSH URL,
+          host, or IP — use <code>ssh://root@host</code>, <code>host.example.com</code>, or{' '}
+          <code>10.0.0.5</code>.
+        </div>
+      )}
     </div>
   )
 }

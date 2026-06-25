@@ -19,7 +19,7 @@
   height: 70%;
   filter: blur(46px);
   mix-blend-mode: screen; /* glow against the dark sky */
-  opacity: 0.18;
+  opacity: calc(0.18 * var(--aurora-mul, 1));
   will-change: transform, opacity;
 }
 
@@ -74,16 +74,16 @@
 @keyframes aurora-breathe {
   0%,
   100% {
-    opacity: 0.1;
+    opacity: calc(0.1 * var(--aurora-mul, 1));
   }
   50% {
-    opacity: 0.3;
+    opacity: calc(0.3 * var(--aurora-mul, 1));
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .aurora__band {
     animation: none;
-    opacity: 0.16;
+    opacity: calc(0.16 * var(--aurora-mul, 1));
   }
 }

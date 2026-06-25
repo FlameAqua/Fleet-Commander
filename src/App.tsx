@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { apiGet, getConfig } from './api'
+import { apiGet, authCheck, getConfig, type AuthResult } from './api'
 import { csvVariableNames } from './lib/csv'
 import { SourcePanel } from './features/source/SourcePanel'
 import { emptySource, type SourceMode, type SourceState } from './features/source/sourceModel'
@@ -31,9 +31,10 @@ import { Stars } from './components/Stars'
 import { Aurora } from './components/Aurora'
 import { Clouds } from './components/Clouds'
 import { Waves } from './components/Waves'
+import { Rain } from './components/Rain'
 import { WindowControls } from './components/WindowControls'
 import { CsvGuide } from './components/CsvGuide'
-import { Settings, DEFAULT_ANIM, type AnimPrefs } from './components/Settings'
+import { Settings, DEFAULT_ANIM, DEFAULT_FX, type AnimPrefs, type FxLevels } from './components/Settings'
 import { UpdateBanner } from './components/UpdateBanner'
 import './App.css'
 
@@ -81,6 +82,17 @@ function App() {
     }
   })
   const [settingsOpen, setSettingsOpen] = useState(false)
+  // Easter egg: flicking Day/Night too fast makes it rain (click the drop to clear).
+  const [rainMode, setRainMode] = useState(false)
+  const themeFlicks = useRef<number[]>([])
+  const rainStart = useRef(0)
+  const [fx, setFx] = useState<FxLevels>(() => {
+    try {
+      return { ...DEFAULT_FX, ...JSON.parse(localStorage.getItem('fc.fx') || '{}') }
+    } catch {
+      return DEFAULT_FX
+    }
+  })
   const [shipFreq, setShipFreq] = useState<number>(() => {
     try {
       const v = parseInt(localStorage.getItem('fc.shipFreq') || '', 10)
@@ -99,7 +111,7 @@ function App() {
     test: emptySource('test'),
   }))
   const [testPassword, setTestPassword] = useState('')
-  const [action, setAction] = useState<ActionId>('threecx')
+  const [action, setAction] = useState<ActionId>('custom_script')
   const [config, setConfig] = useState<DeployConfigForm>(INITIAL_CONFIG)
   const [customScript, setCustomScript] = useState<CustomScriptState>(() => emptyCustomScript())
   const [threecx, setThreecx] = useState<ThreecxState>(() => emptyThreecx())
@@ -137,6 +149,18 @@ function App() {
       /* ignore */
     }
   }, [shipFreq])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('fc.fx', JSON.stringify(fx))
+    } catch {
+      /* ignore */
+    }
+  }, [fx])
+
+  useEffect(() => {
+    document.documentElement.dataset.rain = rainMode ? 'on' : 'off'
+  }, [rainMode])
 
   useEffect(() => {
     let cancelled = false
@@ -190,6 +214,83 @@ function App() {
       setTestPassword(pw)
     }
     setStep('action')
+  }
+
+  // --- Test Connection: connect-only SSH auth check (re-promptable) -------- #
+  const [authChecking, setAuthChecking] = useState(false)
+  const [authResults, setAuthResults] = useState<{ results: AuthResult[]; passed: number; total: number } | null>(null)
+  const [authError, setAuthError] = useState<string | null>(null)
+
+  async function onTestConnection() {
+    setAuthError(null)
+    let testPw: string | undefined
+    if (isTest) {
+      // Always re-prompt so a wrong password can be corrected and re-tried.
+      const pw = await prompt({
+        title: 'Test host password',
+        message: `Password for ${testHost ?? 'the test host'} (used for the connection test):`,
+        password: true,
+        confirmLabel: 'Test',
+      })
+      if (pw === null) return
+      if (!pw) {
+        setAuthError('Password is required.')
+        return
+      }
+      testPw = pw
+      setTestPassword(pw) // remember the verified password for the run
+    } else if (selectedHosts(source).length === 0) {
+      setAuthError('Select at least one system first.')
+      return
+    }
+    setAuthChecking(true)
+    setAuthResults(null)
+    try {
+      const form = buildDeployForm({
+        action: 'quick_diag', // ignored by /api/auth-check; just needs the source
+        runMode: isTest ? 'test' : 'universal',
+        config,
+        source,
+        testPassword: testPw,
+      })
+      setAuthResults(await authCheck(form))
+    } catch (e) {
+      setAuthError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setAuthChecking(false)
+    }
+  }
+
+  // Let the operator correct a mistyped Test-host password from the Action step.
+  async function reenterTestPassword() {
+    const pw = await prompt({
+      title: 'Test host password',
+      message: `Re-enter the password for ${testHost ?? 'the test host'}:`,
+      password: true,
+      confirmLabel: 'Save',
+    })
+    if (pw === null) return
+    if (!pw) {
+      setRunError('Password is required.')
+      return
+    }
+    setTestPassword(pw)
+    // Update the remembered run so "Retry failed hosts" replays with the new password.
+    if (lastRunRef.current) lastRunRef.current.pw = pw
+    setRunError(null)
+  }
+
+  function toggleTheme() {
+    setTheme((t) => (t === 'night' ? 'day' : 'night'))
+    const now = Date.now()
+    const recent = themeFlicks.current.filter((t) => now - t < 2500)
+    recent.push(now)
+    themeFlicks.current = recent
+    if (recent.length >= 6) {
+      setRainMode(true)
+      rainStart.current = Date.now()
+      themeFlicks.current = []
+    }
   }
 
   async function ensureTestPassword(): Promise<string | null> {
@@ -380,6 +481,11 @@ function App() {
 
   // Why the primary Run button is disabled (3CX needs entities / a file).
   function runDisabledReason(): string | null {
+    // A staged batch rollout is mid-flight — make the operator Stop it before
+    // starting a fresh run, so the buttons can't be spammed into overlap.
+    if (batchQueue && batchQueue.idx < batchQueue.batches.length - 1) {
+      return 'Finish or stop the current batch rollout first.'
+    }
     if (action !== 'threecx') return null
     const op = threecx.operation
     if (op === 'audit' || op === 'apply') {
@@ -395,13 +501,14 @@ function App() {
       <Splash ready={health === 'ok'} />
       {theme === 'night' ? (
         <>
-          {anim.aurora && <Aurora />}
-          {anim.stars && <Stars />}
+          {anim.aurora && <Aurora intensity={fx.aurora} />}
+          {anim.stars && <Stars density={fx.stars} />}
         </>
       ) : (
-        anim.clouds && <Clouds />
+        anim.clouds && <Clouds density={fx.clouds} />
       )}
       {anim.waves && <Waves frequency={shipFreq} />}
+      {rainMode && <Rain />}
 
       <header className="app__bar">
         <div className="app__brand">
@@ -419,15 +526,28 @@ function App() {
           >
             ⚙
           </button>
-          <button
-            type="button"
-            className="app__theme"
-            onClick={() => setTheme((t) => (t === 'night' ? 'day' : 'night'))}
-            title={theme === 'night' ? 'Switch to Day Mode' : 'Switch to Night Mode'}
-            aria-label="Toggle Day / Night"
-          >
-            {theme === 'night' ? '☀' : '☾'}
-          </button>
+          {rainMode ? (
+            <button
+              type="button"
+              className="app__theme app__raindrop"
+              // A 1s grace period so a spam-click can't instantly dismiss it.
+              onClick={() => Date.now() - rainStart.current >= 1000 && setRainMode(false)}
+              title="Clear the rain"
+              aria-label="Clear the rain"
+            >
+              💧
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="app__theme"
+              onClick={toggleTheme}
+              title={theme === 'night' ? 'Switch to Day Mode' : 'Switch to Night Mode'}
+              aria-label="Toggle Day / Night"
+            >
+              {theme === 'night' ? '☀' : '☾'}
+            </button>
+          )}
           <WindowControls />
         </div>
       </header>
@@ -440,7 +560,17 @@ function App() {
             </h2>
             <SourcePanel source={source} onChange={setSource} onModeChange={onModeChange} testHost={testHost} />
             <div className="step__nav">
-              <CsvGuide />
+              <div className="step__navleft">
+                <CsvGuide />
+                <button
+                  type="button"
+                  className="step__back"
+                  disabled={authChecking || !canProceed}
+                  onClick={() => void onTestConnection()}
+                >
+                  {authChecking ? 'Testing…' : '🔌 Test Connection'}
+                </button>
+              </div>
               <div className="step__navright">
                 <span className="step__hint">
                   {canProceed ? `Ready — working on ${systemsLabel}.` : 'Select at least one system to continue.'}
@@ -471,6 +601,7 @@ function App() {
               runHint={runDisabledReason()}
               runHidden={runHidden}
               onRun={onRun}
+              onStop={() => run.cancel()}
               customScriptSlot={<CustomScriptPanel value={customScript} onChange={setCustomScript} variables={availableVars} />}
               threecxSlot={
                 <ThreecxPanel
@@ -483,7 +614,11 @@ function App() {
             />
             {runError && <div className="app__runerror">✕ {runError}</div>}
 
-            <ResultsPanel run={run} onFallback={onFallback} />
+            <ResultsPanel
+              run={run}
+              onFallback={onFallback}
+              onReenterPassword={isTest ? () => void reenterTestPassword() : undefined}
+            />
 
             {batchQueue && run.status === 'done' && batchQueue.idx < batchQueue.batches.length - 1 && (
               <div className="batchbar">
@@ -509,10 +644,69 @@ function App() {
         onClose={() => setSettingsOpen(false)}
         anim={anim}
         onAnimChange={setAnim}
+        fx={fx}
+        onFxChange={setFx}
         shipFreq={shipFreq}
         onShipFreqChange={setShipFreq}
       />
       <UpdateBanner />
+
+      {(authResults || authError) && (
+        <div
+          className="confirm__overlay"
+          onMouseDown={() => {
+            setAuthResults(null)
+            setAuthError(null)
+          }}
+        >
+          <div className="confirm" onMouseDown={(e) => e.stopPropagation()}>
+            <div className="confirm__head">
+              <h3>Connection test</h3>
+            </div>
+            {authError ? (
+              <p className="app__runerror">✕ {authError}</p>
+            ) : authResults ? (
+              <>
+                <p className={`confirm__summary ${authResults.passed === authResults.total ? '' : 'authres--warn'}`}>
+                  {authResults.passed} of {authResults.total} system{authResults.total === 1 ? '' : 's'} authenticated.
+                </p>
+                <ul className="authres__list">
+                  {authResults.results.map((r) => (
+                    <li key={r.label} className={r.ok ? 'is-ok' : 'is-fail'}>
+                      <span className="authres__dot">{r.ok ? '✓' : '✕'}</span>
+                      <span className="authres__label">{r.label.replace(/^ssh:\/\//, '')}</span>
+                      {!r.ok && <span className="authres__err">{r.error}</span>}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : null}
+            <div className="confirm__actions">
+              <button
+                type="button"
+                className="run__btn"
+                onClick={() => {
+                  setAuthResults(null)
+                  setAuthError(null)
+                }}
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                className="run__btn run__btn--primary"
+                onClick={() => {
+                  setAuthResults(null)
+                  setAuthError(null)
+                  void onTestConnection()
+                }}
+              >
+                Test again
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {approval && (
         <div className="confirm__overlay" onMouseDown={() => setApproval(null)}>

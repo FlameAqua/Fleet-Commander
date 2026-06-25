@@ -85,11 +85,24 @@ export function Waves({ frequency = 4 }: { frequency?: number }) {
     [count],
   )
 
+  // Easter egg: wiggling the frequency slider fast summons the Black Pearl.
+  const [pearlKey, setPearlKey] = useState(0)
+  const [pearlOn, setPearlOn] = useState(false)
+  useEffect(() => {
+    const onPearl = () => {
+      setPearlKey((k) => k + 1)
+      setPearlOn(true)
+    }
+    window.addEventListener('fc:blackpearl', onPearl)
+    return () => window.removeEventListener('fc:blackpearl', onPearl)
+  }, [])
+
   return (
     <div className="waves" aria-hidden="true">
       {slots.map((s, i) => (
         <Ship key={i} dir={s.dir} bottom={s.bottom} crossMs={s.crossMs} pool={pool} gapMs={gapMs} />
       ))}
+      {pearlOn && <BlackPearl key={pearlKey} onDone={() => setPearlOn(false)} />}
 
       <svg className="waves__svg" viewBox="0 24 150 28" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
         <defs>
@@ -129,6 +142,7 @@ function Ship({
   const [variant, setVariant] = useState<Variant>(() => pickVariant(pool))
   const [errored, setErrored] = useState(false)
   const [sailing, setSailing] = useState(false)
+  const [sinking, setSinking] = useState(false)
   const poolRef = useRef(pool)
   poolRef.current = pool
   const sailingRef = useRef(false)
@@ -138,8 +152,14 @@ function Ship({
   const launch = useCallback(() => {
     setVariant(pickVariant(poolRef.current))
     setErrored(false)
+    setSinking(false)
     setSailing(true)
   }, [])
+
+  const scheduleNext = useCallback(() => {
+    const delay = gapMs * (0.6 + Math.random() * 0.8) // jitter so it's not metronomic
+    timer.current = window.setTimeout(launch, delay)
+  }, [gapMs, launch])
 
   // When the available ships change (art added/removed), re-pick for any ship
   // that's parked so it adopts the new set instead of a now-deleted image.
@@ -163,13 +183,19 @@ function Ship({
 
   return (
     <div
-      className={`ship ship--${dir}${sailing ? ' is-sailing' : ''}`}
+      className={`ship ship--${dir}${sailing ? ' is-sailing' : ''}${sinking ? ' is-sinking' : ''}`}
       style={{ bottom, animationDuration: `${crossMs}ms` }}
+      // Click a sailing ship to sink it (hops up, flips, sinks under).
+      onClick={() => sailing && !sinking && setSinking(true)}
       onAnimationEnd={(e) => {
-        if (e.animationName !== `fc-ship-cross-${dir}`) return
-        setSailing(false)
-        const delay = gapMs * (0.6 + Math.random() * 0.8) // jitter so it's not metronomic
-        timer.current = window.setTimeout(launch, delay)
+        if (e.animationName === 'fc-ship-sink') {
+          setSinking(false)
+          setSailing(false)
+          scheduleNext()
+        } else if (e.animationName === `fc-ship-cross-${dir}`) {
+          setSailing(false)
+          scheduleNext()
+        }
       }}
     >
       {sailing &&
@@ -183,6 +209,36 @@ function Ship({
         ) : (
           <DefaultComp />
         ))}
+    </div>
+  )
+}
+
+// --- Black Pearl easter egg (wiggle the frequency slider to summon) -------- //
+function BlackPearl({ onDone }: { onDone: () => void }) {
+  return (
+    <div
+      className="ship ship--ltr ship--pearl is-sailing"
+      style={{ bottom: 26, animationDuration: '15000ms' }}
+      onAnimationEnd={(e) => {
+        if (e.animationName === 'fc-ship-cross-ltr') onDone()
+      }}
+    >
+      <svg className="ship__bob" viewBox="0 0 66 46" xmlns="http://www.w3.org/2000/svg">
+        {/* hull + raised stern */}
+        <path d="M5 31 C 20 35, 46 35, 61 31 L 55 41 L 11 41 Z" className="pearl__hull" />
+        <path d="M6 23 L15 23 L13 31 L7 31 Z" className="pearl__hull" />
+        <path d="M58 30 L66 27 L60 32 Z" className="pearl__hull" />
+        {/* masts */}
+        <line x1="21" y1="5" x2="21" y2="31" className="pearl__mast" />
+        <line x1="35" y1="2" x2="35" y2="31" className="pearl__mast" />
+        <line x1="48" y1="7" x2="48" y2="31" className="pearl__mast" />
+        {/* tattered black sails */}
+        <path d="M14 7 H28 V19 L25 22 L22 19 L19 22 L16 19 L14 21 Z" className="pearl__sail" />
+        <path d="M28 4 H43 V18 L40 21 L37 18 L34 21 L31 18 L28 20 Z" className="pearl__sail" />
+        <path d="M42 9 H54 V20 L51 23 L48 20 L45 23 L42 21 Z" className="pearl__sail" />
+        {/* tattered flag */}
+        <path d="M35 2 L44 4 L37 6 L43 8 L35 8 Z" className="pearl__flag" />
+      </svg>
     </div>
   )
 }

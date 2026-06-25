@@ -46,6 +46,17 @@ const MUTATING_PATTERNS: RegExp[] = [
   />>?\s*(?!&)(?!\/dev\/(null|stdout|stderr)\b)[\w./~$-]+/,
 ]
 
+// RouterOS (MikroTik) equivalents — the POSIX patterns above don't apply to
+// the RouterOS console, so dangerous RouterOS commands need their own list.
+const ROUTEROS_DESTRUCTIVE: { re: RegExp; label: string }[] = [
+  { re: /reset-configuration/i, label: 'reset-configuration (factory reset)' },
+  { re: /\/system\s+(reboot|shutdown)/i, label: '/system reboot / shutdown' },
+  { re: /\/system\s+reset\b/i, label: '/system reset' },
+  { re: /(^|[\s;])remove\b/i, label: 'remove (deletes config items)' },
+  { re: /\/file\s+remove/i, label: '/file remove' },
+]
+const ROUTEROS_MUTATING: RegExp[] = [/(^|[\s;])(set|add|enable|disable|move|unset)\b/i]
+
 function scriptContent(cs: CustomScriptState): string {
   return cs.source === 'library' ? cs.library.content : cs.source === 'paste' ? cs.paste : cs.upload.content
 }
@@ -63,14 +74,17 @@ export function assessRisk(action: ActionId, threecx: ThreecxState, customScript
 
     case 'custom_script': {
       const content = scriptContent(customScript)
-      const hits = DESTRUCTIVE_PATTERNS.filter((p) => p.re.test(content)).map((p) => `⚠ ${p.label}`)
-      const root = customScript.rootMode !== 'none'
+      const ros = customScript.interpreter === 'routeros'
+      const destructivePatterns = ros ? ROUTEROS_DESTRUCTIVE : DESTRUCTIVE_PATTERNS
+      const mutatingPatterns = ros ? ROUTEROS_MUTATING : MUTATING_PATTERNS
+      const hits = destructivePatterns.filter((p) => p.re.test(content)).map((p) => `⚠ ${p.label}`)
+      const root = !ros && customScript.rootMode !== 'none' // su doesn't apply to RouterOS
       if (hits.length) {
         const details = [...hits]
         if (root) details.push('Runs as root via su escalation.')
         return { level: 'destructive', title: 'Custom script', summary: 'This script contains commands that can be destructive. Review it carefully before running.', details }
       }
-      if (!MUTATING_PATTERNS.some((re) => re.test(content))) {
+      if (!mutatingPatterns.some((re) => re.test(content))) {
         return { level: 'read-only', title: 'Custom script', summary: 'This script looks read-only — no file writes or system-changing commands were detected.', details: [] }
       }
       return { level: 'modifies', title: 'Custom script', summary: 'Runs your script on each system — it writes files or changes system state.', details: root ? ['Runs as root via su escalation.'] : [] }

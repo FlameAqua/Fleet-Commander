@@ -5,48 +5,22 @@
   z-index: 0;
   overflow: hidden;
 }
+/* Clouds are generated in JS (count = density); position/size/speed/direction
+   come from inline styles. */
 .cloud {
   position: absolute;
+  left: 0;
   width: 200px;
   height: auto;
   opacity: 0.7;
   filter: blur(1px) drop-shadow(0 6px 10px rgba(120, 150, 200, 0.18));
   will-change: transform;
+  transform: translateX(-30vw);
+  animation: fc-cloud linear infinite; /* duration from inline style */
 }
-.cloud--a {
-  top: 9%;
-  width: 230px;
-  opacity: 0.78;
-  animation: fc-cloud 90s linear infinite;
-}
-.cloud--b {
-  top: 26%;
-  width: 160px;
-  opacity: 0.6;
-  animation: fc-cloud 130s linear infinite;
-  animation-delay: -40s;
-}
-.cloud--c {
-  top: 16%;
-  width: 280px;
-  opacity: 0.5;
-  animation: fc-cloud 170s linear infinite;
-  animation-delay: -110s;
-}
-/* Clouds drifting in from the right */
-.cloud--d {
-  top: 13%;
-  width: 200px;
-  opacity: 0.66;
-  animation: fc-cloud-rtl 110s linear infinite;
-  animation-delay: -20s;
-}
-.cloud--e {
-  top: 30%;
-  width: 250px;
-  opacity: 0.52;
-  animation: fc-cloud-rtl 150s linear infinite;
-  animation-delay: -95s;
+.cloud--rtl {
+  transform: translateX(125vw) scaleX(-1);
+  animation-name: fc-cloud-rtl;
 }
 @keyframes fc-cloud {
   0% {

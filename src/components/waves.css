@@ -87,6 +87,64 @@
   height: 30px;
   will-change: transform;
   z-index: 1;
+  pointer-events: auto; /* clickable (the rest of .waves is click-through) */
+}
+.ship.is-sailing {
+  cursor: pointer;
+}
+
+/* Click-to-sink: freeze the crossing in place, then the ship hops, flips
+   upside-down and slides under the water. */
+.ship.is-sinking {
+  animation-play-state: paused;
+  cursor: default;
+}
+.ship.is-sinking .ship__bob {
+  animation: fc-ship-sink 1.15s cubic-bezier(0.5, 0, 0.7, 1) forwards;
+  transform-origin: 50% 55%;
+}
+@keyframes fc-ship-sink {
+  0% {
+    transform: translateY(0) rotate(0deg);
+    opacity: 1;
+  }
+  22% {
+    transform: translateY(-16px) rotate(28deg);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(48px) rotate(196deg);
+    opacity: 0;
+  }
+}
+
+/* The Black Pearl — summoned by wiggling the frequency slider. */
+.ship--pearl {
+  width: 72px;
+  height: 50px;
+  z-index: 2;
+  pointer-events: none;
+}
+.pearl__hull {
+  fill: #0b0b12;
+}
+.pearl__mast {
+  stroke: #0b0b12;
+  stroke-width: 1.5;
+}
+.pearl__sail {
+  fill: #23232e;
+  stroke: #34343f;
+  stroke-width: 0.5;
+}
+.pearl__flag {
+  fill: #6e131a;
+}
+:root[data-theme='night'] .pearl__hull {
+  fill: #05050a;
+}
+:root[data-theme='night'] .pearl__sail {
+  fill: #2b2b38;
 }
 .ship__bob {
   width: 100%;

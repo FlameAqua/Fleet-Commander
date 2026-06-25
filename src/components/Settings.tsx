@@ -2,15 +2,17 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   ApiError,
+  deleteShip,
   getSettings,
   listShips,
   openFolder,
   pickFolder,
   saveSettings,
+  shipUrl,
   uploadShip,
   type AppSettings,
 } from '../api'
-import { APP_VERSION, GITHUB_URL, RELEASE_NOTES } from '../releaseNotes'
+import { APP_VERSION, GITHUB_URL } from '../releaseNotes'
 import { openExternal } from '../lib/external'
 import './settings.css'
 
@@ -29,6 +31,15 @@ export const DEFAULT_ANIM: AnimPrefs = {
   waves: true,
   panel: true,
 }
+
+/** Intensity/density levels (1–10) for the animated effects. */
+export interface FxLevels {
+  aurora: number
+  stars: number
+  clouds: number
+}
+
+export const DEFAULT_FX: FxLevels = { aurora: 5, stars: 5, clouds: 5 }
 
 const ANIM_ROWS: { key: keyof AnimPrefs; label: string; tag?: string }[] = [
   { key: 'stars', label: 'Stars', tag: 'night' },
@@ -65,11 +76,13 @@ interface Props {
   onClose: () => void
   anim: AnimPrefs
   onAnimChange: (a: AnimPrefs) => void
+  fx: FxLevels
+  onFxChange: (fx: FxLevels) => void
   shipFreq: number
   onShipFreqChange: (n: number) => void
 }
 
-export function Settings({ open, onClose, anim, onAnimChange, shipFreq, onShipFreqChange }: Props) {
+export function Settings({ open, onClose, anim, onAnimChange, fx, onFxChange, shipFreq, onShipFreqChange }: Props) {
   const [settings, setSettings] = useState<AppSettings | null>(null)
   const [folderErr, setFolderErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -77,6 +90,8 @@ export function Settings({ open, onClose, anim, onAnimChange, shipFreq, onShipFr
   const [shipErr, setShipErr] = useState<string | null>(null)
   const shipInput = useRef<HTMLInputElement>(null)
   const [upd, setUpd] = useState<UpdateStatus | null>(null)
+  // Tracks rapid back-and-forth slider wiggles for the Black Pearl easter egg.
+  const wiggle = useRef({ last: shipFreq, dir: 0, count: 0, t: 0 })
 
   useEffect(() => {
     if (!open) return
@@ -108,6 +123,21 @@ export function Settings({ open, onClose, anim, onAnimChange, shipFreq, onShipFr
       const r = await listShips()
       setShips(r.ships)
       window.dispatchEvent(new Event('fc:ships-changed')) // tell Waves to refresh
+    } catch (e) {
+      setShipErr(errMsg(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function removeShipArt(name: string) {
+    setShipErr(null)
+    setBusy(true)
+    try {
+      await deleteShip(name)
+      const r = await listShips()
+      setShips(r.ships)
+      window.dispatchEvent(new Event('fc:ships-changed'))
     } catch (e) {
       setShipErr(errMsg(e))
     } finally {
@@ -147,6 +177,26 @@ export function Settings({ open, onClose, anim, onAnimChange, shipFreq, onShipFr
 
   const setAnim = (key: keyof AnimPrefs, val: boolean) => onAnimChange({ ...anim, [key]: val })
 
+  function onFreq(v: number) {
+    onShipFreqChange(v)
+    const w = wiggle.current
+    const now = Date.now()
+    const d = Math.sign(v - w.last)
+    if (d !== 0) {
+      if (w.dir !== 0 && d !== w.dir) {
+        // A direction reversal — count consecutive ones within a short window.
+        w.count = now - w.t < 1400 ? w.count + 1 : 1
+        w.t = now
+        if (w.count >= 4) {
+          window.dispatchEvent(new Event('fc:blackpearl'))
+          w.count = 0
+        }
+      }
+      w.dir = d
+    }
+    w.last = v
+  }
+
   return createPortal(
     <div className="settings__overlay" onMouseDown={onClose}>
       <div className="settings" onMouseDown={(e) => e.stopPropagation()}>
@@ -158,7 +208,7 @@ export function Settings({ open, onClose, anim, onAnimChange, shipFreq, onShipFr
         </div>
 
         <section className="settings__section">
-          <h4>Animations</h4>
+          <h4>Animations &amp; Effects</h4>
           <p className="settings__hint">
             Turn these off if the background renders poorly (e.g. over RDP).
           </p>
@@ -175,6 +225,44 @@ export function Settings({ open, onClose, anim, onAnimChange, shipFreq, onShipFr
               </span>
             </label>
           ))}
+
+          {anim.aurora && (
+            <FxSlider
+              label="Aurora intensity"
+              value={fx.aurora}
+              onChange={(v) => onFxChange({ ...fx, aurora: v })}
+            />
+          )}
+          {anim.stars && (
+            <FxSlider
+              label="Star density"
+              value={fx.stars}
+              onChange={(v) => onFxChange({ ...fx, stars: v })}
+            />
+          )}
+          {anim.clouds && (
+            <FxSlider
+              label="Cloud density"
+              value={fx.clouds}
+              onChange={(v) => onFxChange({ ...fx, clouds: v })}
+            />
+          )}
+          {anim.waves && (
+            <label className="settings__slider">
+              <span>Ship Frequency</span>
+              <input
+                type="range"
+                min={1}
+                max={10}
+                step={1}
+                value={shipFreq}
+                onChange={(e) => onFreq(Number(e.target.value))}
+              />
+              <span className="settings__slidernum">
+                {shipFreq <= 2 ? 'rare' : shipFreq >= 9 ? 'busy' : shipFreq}
+              </span>
+            </label>
+          )}
         </section>
 
         <section className="settings__section">
@@ -236,18 +324,25 @@ export function Settings({ open, onClose, anim, onAnimChange, shipFreq, onShipFr
               }}
             />
           </div>
-          <label className="settings__slider">
-            <span>Frequency</span>
-            <input
-              type="range"
-              min={1}
-              max={10}
-              step={1}
-              value={shipFreq}
-              onChange={(e) => onShipFreqChange(Number(e.target.value))}
-            />
-            <span className="settings__slidernum">{shipFreq <= 2 ? 'rare' : shipFreq >= 9 ? 'busy' : shipFreq}</span>
-          </label>
+          {ships.length > 0 && (
+            <ul className="settings__ships">
+              {ships.map((name) => (
+                <li key={name} className="settings__ship">
+                  <img className="settings__shipthumb" src={shipUrl(name)} alt="" />
+                  <span className="settings__shipname" title={name}>{name}</span>
+                  <button
+                    type="button"
+                    className="settings__shipdel"
+                    title="Remove"
+                    disabled={busy}
+                    onClick={() => void removeShipArt(name)}
+                  >
+                    ✕
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
           {shipErr && <div className="settings__err">{shipErr}</div>}
         </section>
 
@@ -282,22 +377,7 @@ export function Settings({ open, onClose, anim, onAnimChange, shipFreq, onShipFr
           </section>
         )}
 
-        <section className="settings__section">
-          <h4>Release notes</h4>
-          {RELEASE_NOTES.map((rn) => (
-            <div key={rn.version} className="settings__rn">
-              <div className="settings__rnhead">
-                <b>{rn.version}</b>
-                <span>{rn.date}</span>
-              </div>
-              <ul>
-                {rn.notes.map((n, i) => (
-                  <li key={i}>{n}</li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </section>
+        
 
         <div className="settings__foot">
           <span className="settings__ver">Fleet Commander {window.electron?.appVersion || APP_VERSION}</span>
@@ -308,6 +388,31 @@ export function Settings({ open, onClose, anim, onAnimChange, shipFreq, onShipFr
       </div>
     </div>,
     document.body,
+  )
+}
+
+function FxSlider({
+  label,
+  value,
+  onChange,
+}: {
+  label: string
+  value: number
+  onChange: (v: number) => void
+}) {
+  return (
+    <label className="settings__slider">
+      <span>{label}</span>
+      <input
+        type="range"
+        min={1}
+        max={10}
+        step={1}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+      />
+      <span className="settings__slidernum">{value <= 2 ? 'low' : value >= 9 ? 'high' : value}</span>
+    </label>
   )
 }
 

@@ -3099,6 +3099,45 @@ def _exec_with_su(
     return "\n".join(cleaned_lines).strip(), exit_status
 
 
+def check_auth(target: Target, password: str, cfg: DeployConfig):
+    """
+    Connect-only SSH auth test for *target*. Returns ``(ok, error)`` — no
+    command is run. Lets the UI verify credentials before preparing an action.
+    """
+    if not password:
+        return (False, "no password available for this host")
+    client = _make_client(cfg.strict_host_keys)
+    try:
+        client.connect(
+            hostname=target.host,
+            port=target.port,
+            username=target.user,
+            password=password,
+            timeout=cfg.connect_timeout,
+            banner_timeout=cfg.connect_timeout,
+            auth_timeout=cfg.connect_timeout,
+            allow_agent=False,
+            look_for_keys=False,
+        )
+        if not cfg.strict_host_keys:
+            try:
+                client.save_host_keys(KNOWN_HOSTS_PATH)
+            except Exception:
+                pass
+        return (True, "")
+    except paramiko.AuthenticationException:
+        return (False, "authentication failed")
+    except (paramiko.SSHException, socket.timeout, socket.error, OSError) as e:
+        return (False, f"connection error: {e}")
+    except Exception as e:  # noqa: BLE001 - last-resort guard
+        return (False, f"unexpected error: {e}")
+    finally:
+        try:
+            client.close()
+        except Exception:
+            pass
+
+
 def deploy_host(
     target: Target,
     password: str,

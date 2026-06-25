@@ -274,3 +274,23 @@ export async function uploadShip(file: File): Promise<{ filename: string }> {
     await fetch(apiUrl('/api/ship-upload'), { method: 'POST', body: fd }),
   )
 }
+
+export async function deleteShip(name: string): Promise<void> {
+  await parseJson<{ ok: true }>(await jsonPost('/api/ship-delete', { name }))
+}
+
+// --- SSH auth pre-check (Test Connection) --------------------------------- //
+export interface AuthResult {
+  label: string
+  ok: boolean
+  error: string
+}
+
+/** Connect-only SSH auth test. Takes the same multipart form as a deploy. */
+export async function authCheck(
+  form: FormData,
+): Promise<{ results: AuthResult[]; passed: number; total: number }> {
+  return parseJson<{ ok: true; results: AuthResult[]; passed: number; total: number }>(
+    await fetch(apiUrl('/api/auth-check'), { method: 'POST', body: form }),
+  )
+}

@@ -24,9 +24,11 @@ export default defineConfig([
       'react-refresh/only-export-components': 'warn',
       // React-Compiler-oriented rules (react-hooks 6+) that flag valid patterns
       // we use deliberately (latest-ref assignment in render; setState in a
-      // data-fetch effect). Keep visible as warnings rather than blocking CI.
+      // data-fetch effect; Math.random for decorative scenery). Keep visible as
+      // warnings rather than blocking CI.
       'react-hooks/set-state-in-effect': 'warn',
       'react-hooks/refs': 'warn',
+      'react-hooks/purity': 'warn',
     },
   },
 ])

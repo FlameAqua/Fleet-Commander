@@ -19,14 +19,14 @@ interface TabDef {
 
 const TABS: TabDef[] = [
   {
-    id: 'threecx',
-    label: '3CX Manager',
-    actions: [{ id: 'threecx', label: '3CX Manager', blurb: 'Audit, modify, export, or import 3CX xAPI configuration on the selected systems.' }],
-  },
-  {
     id: 'custom',
     label: 'Custom Script',
     actions: [{ id: 'custom_script', label: 'Custom Script', blurb: 'Run any script on the selected systems.' }],
+  },
+  {
+    id: 'threecx',
+    label: '3CX Manager',
+    actions: [{ id: 'threecx', label: '3CX Manager', blurb: 'Audit, modify, export, or import 3CX xAPI configuration on the selected systems.' }],
   },
   {
     id: 'maintenance',
@@ -54,11 +54,13 @@ interface Props {
   runHidden?: boolean
   /** Run the current action, or an explicit one (used by the Other launchers). */
   onRun: (actionOverride?: ActionId) => void
+  /** Abort the in-flight run (shown as a Stop button while running). */
+  onStop: () => void
   customScriptSlot: ReactNode
   threecxSlot: ReactNode
 }
 
-export function ActionPanel({ action, setAction, running, runHint, runHidden, onRun, customScriptSlot, threecxSlot }: Props) {
+export function ActionPanel({ action, setAction, running, runHint, runHidden, onRun, onStop, customScriptSlot, threecxSlot }: Props) {
   const activeTab = TABS.find((t) => t.actions.some((a) => a.id === action)) ?? TABS[0]
   const current = activeTab.actions.find((a) => a.id === action) ?? activeTab.actions[0]
 
@@ -108,6 +110,11 @@ export function ActionPanel({ action, setAction, running, runHint, runHidden, on
             {!runHidden && (
               <div className="run__buttons">
                 {runHint && <span className="run__hint">{runHint}</span>}
+                {running && (
+                  <button type="button" className="run__btn" onClick={onStop}>
+                    Stop
+                  </button>
+                )}
                 <button
                   type="button"
                   className="run__btn run__btn--primary"

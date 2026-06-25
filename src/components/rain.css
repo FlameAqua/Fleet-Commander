@@ -1,0 +1,52 @@
+.rain {
+  position: fixed;
+  inset: 0;
+  z-index: 0; /* over the sky/scenery, but behind the bar & content cards */
+  pointer-events: none;
+  overflow: hidden;
+  background: rgba(8, 12, 26, 0.34); /* storm darkens the sky a little */
+}
+/* Storm clouds — darker while it's raining (day mode). */
+:root[data-rain='on'] .cloud g {
+  fill: #3c4453;
+}
+.rain__drop {
+  position: absolute;
+  top: -24px;
+  width: 1.6px;
+  border-radius: 1px;
+  background: linear-gradient(to bottom, transparent, rgba(170, 200, 255, 0.9));
+  animation: rain-fall linear infinite;
+  will-change: transform;
+}
+@keyframes rain-fall {
+  0% {
+    transform: translateY(-24px);
+  }
+  100% {
+    transform: translateY(104vh);
+  }
+}
+
+/* The Day/Night button transformed into a raindrop. */
+.app__raindrop {
+  background: none;
+  font-size: 1.05rem;
+  animation: rain-drip 1.6s ease-in-out infinite;
+}
+@keyframes rain-drip {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(2px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rain__drop,
+  .app__raindrop {
+    animation: none;
+  }
+}

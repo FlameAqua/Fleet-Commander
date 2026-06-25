@@ -51,11 +51,15 @@ function cardLog(card: HostCard): string {
 interface Props {
   run: DeployRun
   onFallback: () => void
+  /** Provided only for Test-host runs — re-prompt for the password. */
+  onReenterPassword?: () => void
 }
 
-export function ResultsPanel({ run, onFallback }: Props) {
+export function ResultsPanel({ run, onFallback, onReenterPassword }: Props) {
   const { status, meta, fatal, cards, failedLabels } = run
   if (status === 'idle' && !cards.length && !fatal) return null
+  // Show "Re-enter password" when a failure is an authentication failure.
+  const hasAuthFailure = cards.some((c) => c.status === 'fail' && c.stage === 'auth')
 
   const byOutcome = {
     success: cards.filter((c) => outcomeOf(c) === 'success'),
@@ -133,6 +137,11 @@ export function ResultsPanel({ run, onFallback }: Props) {
           <button type="button" className="run__btn" onClick={onFallback}>
             Retry {failedLabels.length} failed host{failedLabels.length === 1 ? '' : 's'}
           </button>
+          {onReenterPassword && hasAuthFailure && (
+            <button type="button" className="run__btn" onClick={onReenterPassword}>
+              🔑 Re-enter password
+            </button>
+          )}
         </div>
       )}
     </section>
@@ -164,7 +173,7 @@ function Card({ card, onExport }: { card: HostCard; onExport: () => void }) {
         </button>
         {done && (
           <button type="button" className="card__dl" title="Export this system's log" onClick={onExport}>
-            ⬇
+            <ExportIcon />
           </button>
         )}
       </div>
@@ -188,6 +197,16 @@ function Card({ card, onExport }: { card: HostCard; onExport: () => void }) {
       )}
       {open && <pre className="card__log">{body || '(no output yet)'}</pre>}
     </div>
+  )
+}
+
+function ExportIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 3v11" />
+      <path d="M7.5 9.5 12 14l4.5-4.5" />
+      <path d="M5 20h14" />
+    </svg>
   )
 }
 

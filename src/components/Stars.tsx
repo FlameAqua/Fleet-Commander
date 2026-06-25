@@ -1,20 +1,23 @@
-import type { CSSProperties } from 'react'
+import { useMemo, type CSSProperties } from 'react'
 import './stars.css'
 
-// Generated once for the app's lifetime — stable positions, staggered twinkle.
-const STARS = Array.from({ length: 56 }, () => ({
-  left: Math.random() * 100,
-  top: Math.random() * 70,
-  size: 1 + Math.random() * 1.6,
-  delay: Math.random() * 6,
-  dur: 2.6 + Math.random() * 4,
-}))
+/** Faint twinkling stars behind the night sky. Count scales with `density`. */
+export function Stars({ density = 5 }: { density?: number }) {
+  const stars = useMemo(() => {
+    const d = Math.min(10, Math.max(1, density))
+    const count = Math.round(d * d * 2.5) // 1→3, 5→63, 10→250 (rich sky at max)
+    return Array.from({ length: count }, () => ({
+      left: Math.random() * 100,
+      top: Math.random() * 70,
+      size: 1 + Math.random() * 1.6,
+      delay: Math.random() * 6,
+      dur: 2.6 + Math.random() * 4,
+    }))
+  }, [density])
 
-/** Faint twinkling stars drifting in the night sky behind the app. */
-export function Stars() {
   return (
     <div className="stars" aria-hidden="true">
-      {STARS.map((s, i) => (
+      {stars.map((s, i) => (
         <span
           key={i}
           className="star"
