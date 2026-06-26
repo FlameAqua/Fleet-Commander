@@ -25,6 +25,7 @@ import os
 import re
 import shlex
 import socket
+import threading
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlparse
@@ -2841,23 +2842,71 @@ def _get_interpreter(script: str) -> str:
     return "sh -s"
 
 
+# Serializes all access to the shared known_hosts file. Without this, parallel
+# workers would write it concurrently (paramiko's AutoAddPolicy saves it from
+# inside connect()), interleaving the writes and corrupting the file — which
+# then blows up with "Invalid base64-encoded string" the next time it's read.
+_HOSTKEY_LOCK = threading.Lock()
+
+
+class _InMemoryAddPolicy(paramiko.MissingHostKeyPolicy):
+    """Trust-on-first-use that accepts an unknown host key *in memory only*.
+
+    Unlike paramiko's AutoAddPolicy it does NOT write the file from inside
+    connect(); we persist the keys ourselves, serialized, after the connection
+    succeeds (see _save_known_hosts) so concurrent runs can't corrupt it.
+    """
+
+    def missing_host_key(self, client, hostname, key):
+        client.get_host_keys().add(hostname, key.get_name(), key)
+
+
+def _save_known_hosts(client: paramiko.SSHClient) -> None:
+    """Merge a client's trusted host keys into the shared file, serialized.
+
+    Merging (rather than overwriting via save_host_keys) means parallel workers
+    accumulate every host's key instead of clobbering one another, and a
+    previously-corrupted file is rebuilt cleanly from the entries that still
+    parse.
+    """
+    with _HOSTKEY_LOCK:
+        try:
+            merged = paramiko.HostKeys()
+            if os.path.exists(KNOWN_HOSTS_PATH):
+                try:
+                    merged.load(KNOWN_HOSTS_PATH)
+                except Exception:
+                    merged = paramiko.HostKeys()  # corrupted → start fresh
+            keys = client.get_host_keys()
+            for hostname in keys:
+                for keytype, key in keys[hostname].items():
+                    merged.add(hostname, keytype, key)
+            merged.save(KNOWN_HOSTS_PATH)
+        except Exception:
+            pass
+
+
 def _make_client(strict: bool) -> paramiko.SSHClient:
     client = paramiko.SSHClient()
-    # Load any previously-trusted hosts.
+    # Load any previously-trusted hosts (under the lock so a concurrent save
+    # can't have the file half-written while we read it).
     try:
         client.load_system_host_keys()
     except Exception:
         pass
     if os.path.exists(KNOWN_HOSTS_PATH):
-        try:
-            client.load_host_keys(KNOWN_HOSTS_PATH)
-        except Exception:
-            pass
+        with _HOSTKEY_LOCK:
+            try:
+                client.load_host_keys(KNOWN_HOSTS_PATH)
+            except Exception:
+                # A previously-corrupted file: start fresh in memory. The next
+                # _save_known_hosts overwrites the bad file with clean content.
+                pass
     if strict:
         client.set_missing_host_key_policy(paramiko.RejectPolicy())
     else:
-        # Trust-on-first-use: accept and persist unknown keys to a local file.
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        # Trust-on-first-use, persisted by us (not auto-saved mid-connect).
+        client.set_missing_host_key_policy(_InMemoryAddPolicy())
     return client
 
 
@@ -3120,10 +3169,7 @@ def check_auth(target: Target, password: str, cfg: DeployConfig):
             look_for_keys=False,
         )
         if not cfg.strict_host_keys:
-            try:
-                client.save_host_keys(KNOWN_HOSTS_PATH)
-            except Exception:
-                pass
+            _save_known_hosts(client)
         return (True, "")
     except paramiko.AuthenticationException:
         return (False, "authentication failed")
@@ -3202,12 +3248,9 @@ def deploy_host(
         return HostResult(target.label, False, "connect", f"unexpected error: {e}",
                           duration_s=time.time() - start)
 
-    # Persist host key learned via TOFU.
+    # Persist host key learned via TOFU (serialized — see _save_known_hosts).
     if not cfg.strict_host_keys:
-        try:
-            client.save_host_keys(KNOWN_HOSTS_PATH)
-        except Exception:
-            pass
+        _save_known_hosts(client)
 
     # ---- Per-host environment-variable injection -------------------------
     # When the operator supplied a Compound CSV with extra columns, each

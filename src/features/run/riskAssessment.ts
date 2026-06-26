@@ -52,10 +52,18 @@ const ROUTEROS_DESTRUCTIVE: { re: RegExp; label: string }[] = [
   { re: /reset-configuration/i, label: 'reset-configuration (factory reset)' },
   { re: /\/system\s+(reboot|shutdown)/i, label: '/system reboot / shutdown' },
   { re: /\/system\s+reset\b/i, label: '/system reset' },
-  { re: /(^|[\s;])remove\b/i, label: 'remove (deletes config items)' },
+  { re: /(^|[\s;/])remove\b/i, label: 'remove (deletes config items)' },
   { re: /\/file\s+remove/i, label: '/file remove' },
+  { re: /(^|[\s;/])(format|downgrade)\b/i, label: 'format / downgrade' },
+  { re: /(^|[\s;/])upgrade\b/i, label: 'upgrade (firmware — reboots)' },
 ]
-const ROUTEROS_MUTATING: RegExp[] = [/(^|[\s;])(set|add|enable|disable|move|unset)\b/i]
+// Broad on purpose: RouterOS has many state-changing verbs beyond set/add, so
+// anything that isn't plainly read-only (print/get/export/find/monitor) should
+// still ask for confirmation. The boundary includes `/` so top-level commands
+// like `/import` are caught, not just space-preceded verbs.
+const ROUTEROS_MUTATING: RegExp[] = [
+  /(^|[\s;/])(set|add|enable|disable|move|unset|install|import|run|sign|edit|make-static|activate|deactivate|renew|release|schedule|unschedule|reboot)\b/i,
+]
 
 function scriptContent(cs: CustomScriptState): string {
   return cs.source === 'library' ? cs.library.content : cs.source === 'paste' ? cs.paste : cs.upload.content
