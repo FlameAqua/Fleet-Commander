@@ -245,6 +245,21 @@ function App() {
     return run.status !== 'idle' || run.cards.length > 0
   }
 
+  // Reset to a fresh boot: clears the loaded fleet, chosen action, and results.
+  // A reload is the most faithful "as if you rebooted" — settings persist via
+  // localStorage, and the in-memory fleet/action/results state is wiped.
+  async function resetApp() {
+    const ok = await prompt({
+      title: 'Reset app?',
+      message:
+        'This clears your loaded fleet, selected action, and results — like restarting the app. Your settings (theme, folders, animations) are kept.',
+      confirm: true,
+      confirmLabel: 'Reset',
+    })
+    if (ok === null) return
+    window.location.reload()
+  }
+
   function goToStage(target: Step) {
     if (target === step || !stageReachable(target)) return
     // Going to actions may need the Test-host password first.
@@ -600,6 +615,15 @@ function App() {
         </div>
         <div className="app__baractions">
           {health === 'down' && <div className="app__offline">⚠ Backend offline</div>}
+          <button
+            type="button"
+            className="app__theme"
+            onClick={() => void resetApp()}
+            title="Reset — clear fleet, action & results"
+            aria-label="Reset app"
+          >
+            ↺
+          </button>
           <button
             type="button"
             className="app__theme"

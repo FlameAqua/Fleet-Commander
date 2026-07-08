@@ -207,6 +207,7 @@ export function Settings({ open, onClose, anim, onAnimChange, fx, onFxChange, sh
           </button>
         </div>
 
+        <div className="settings__body">
         <section className="settings__section">
           <h4>Animations &amp; Effects</h4>
           <p className="settings__hint">
@@ -384,6 +385,7 @@ export function Settings({ open, onClose, anim, onAnimChange, fx, onFxChange, sh
           <button type="button" className="settings__link" onClick={() => openExternal(GITHUB_URL)}>
             GitHub ↗
           </button>
+        </div>
         </div>
       </div>
     </div>,

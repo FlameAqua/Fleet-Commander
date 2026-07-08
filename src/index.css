@@ -58,10 +58,22 @@ button:disabled {
 }
 
 html {
-  /* Always reserve the scrollbar gutter so switching between a short stage
-     (no scrollbar) and a tall one (scrollbar) doesn't shift the centred
-     content sideways. */
-  scrollbar-gutter: stable;
+  /* Thin scrollbar so the window's content reaches the right edge (no reserved
+     gutter/"padding"), and so the small layout shift when the scrollbar appears
+     on a tall stage is barely perceptible. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 body {
