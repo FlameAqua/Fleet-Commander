@@ -89,6 +89,77 @@
   gap: 1.5rem;
 }
 
+/* Roadmap stepper — the three stages (fleet → action → results) at the top.
+   Frosted + stacking context (like .step) so the fixed cloud layer can't paint
+   over it; centered as a self-contained pill bar. */
+.roadmap {
+  position: relative;
+  z-index: 1;
+  align-self: center; /* shrink to content and centre horizontally */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  padding: 0.4rem 0.6rem;
+  background: color-mix(in srgb, var(--bg) 74%, transparent);
+  backdrop-filter: blur(9px);
+  -webkit-backdrop-filter: blur(9px);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
+}
+.roadmap__arrow {
+  color: var(--muted);
+  opacity: 0.6;
+  font-size: 0.9rem;
+}
+.roadmap__stage {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.8rem 0.35rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel) 80%, transparent);
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.roadmap__stage:hover:not(:disabled):not(.is-active) {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.roadmap__stage.is-active {
+  color: var(--text-h);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  font-weight: 600;
+}
+.roadmap__stage.is-locked {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.roadmap__num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  background: rgba(127, 127, 127, 0.22);
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 700;
+  flex: none;
+}
+.roadmap__stage.is-active .roadmap__num {
+  background: var(--accent);
+  color: #fff;
+}
+
 /* Frosted content card so the animated background stays readable behind it. */
 .step {
   background: color-mix(in srgb, var(--bg) 74%, transparent);
@@ -173,6 +244,43 @@
 .authres--warn {
   color: #d6a93a;
 }
+.authres__filters {
+  display: inline-flex;
+  gap: 0.3rem;
+  margin: 0.35rem 0 0;
+}
+.authres__fbtn {
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 0.2rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(127, 127, 127, 0.1);
+  color: var(--muted);
+  cursor: pointer;
+}
+.authres__fbtn:hover {
+  color: var(--text);
+}
+.authres__fbtn.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.authres__pending {
+  color: var(--muted);
+  font-size: 0.8rem;
+  border-style: dashed !important;
+}
+.authres__title {
+  font-weight: 600;
+  font-size: 0.82rem;
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .authres__list {
   margin: 0.3rem 0 0;
   padding: 0;
@@ -182,6 +290,7 @@
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
+  user-select: text; /* selectable so IPs/titles can be copied */
 }
 .authres__list li {
   display: flex;
@@ -348,6 +457,12 @@
   padding: 0.5rem 0.6rem;
   border: 1px solid var(--border);
   border-radius: 8px;
+}
+.confirm__batch-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  cursor: pointer;
 }
 .confirm__batchsize {
   width: 56px;

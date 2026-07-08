@@ -57,6 +57,19 @@ _METHODS_RE = re.compile(r"^[A-Za-z0-9,]{0,128}$")
 # Local file used for trust-on-first-use host key persistence.
 KNOWN_HOSTS_PATH = bsm_paths.seed_file_once("known_hosts")
 
+# Once connected + authenticated, a script may run for as long as it needs
+# (firmware upgrades, big imports, etc.) — so the read timeout is effectively
+# unlimited. Connection/auth stay bounded by cfg.connect_timeout, and TCP
+# keepalive still detects a genuinely dropped connection. The operator's
+# "Stop" button aborts a run that hangs.
+# paramiko's channel reads wait on a threading lock, whose timeout must stay
+# under threading.TIMEOUT_MAX (~49 days on Windows) or Python raises
+# "OverflowError: timeout value is too large". 20 days is the cap — and it's
+# the max *silence* between output lines (each read resets it when data
+# arrives), so any real script that produces output or finishes is effectively
+# unbounded. Clamped to the platform limit as a belt-and-braces guard.
+_EXEC_NO_TIMEOUT = min(20 * 24 * 3600, int(threading.TIMEOUT_MAX) - 1)
+
 
 # --------------------------------------------------------------------------- #
 # Data structures
@@ -2861,47 +2874,103 @@ class _InMemoryAddPolicy(paramiko.MissingHostKeyPolicy):
         client.get_host_keys().add(hostname, key.get_name(), key)
 
 
+def _read_known_hosts_scrubbed() -> "tuple[paramiko.HostKeys, bool]":
+    """Parse KNOWN_HOSTS_PATH line by line, skipping any corrupt entries.
+
+    paramiko's own ``HostKeys.load`` only skips lines that raise ``SSHException``
+    — but a mangled base64 blob raises ``InvalidHostKey`` (a plain ``Exception``,
+    NOT an ``SSHException``), which propagates and breaks the whole connect. We
+    parse each line ourselves and drop anything that won't parse, so one bad
+    line can never fail an otherwise-fine host.
+
+    Returns ``(HostKeys, had_bad_lines)`` — the caller uses the flag to rewrite
+    (self-heal) the file when corruption was found.
+    """
+    hk = paramiko.HostKeys()
+    had_bad = False
+    if not os.path.exists(KNOWN_HOSTS_PATH):
+        return hk, had_bad
+    try:
+        with open(KNOWN_HOSTS_PATH, "r", encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()
+    except OSError:
+        return hk, had_bad
+    for line in lines:
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        try:
+            entry = paramiko.hostkeys.HostKeyEntry.from_line(s)
+        except Exception:  # noqa: BLE001 - InvalidHostKey, binascii.Error, etc.
+            had_bad = True
+            continue
+        if entry is None:
+            had_bad = True
+            continue
+        for h in entry.hostnames:
+            hk.add(h, entry.key.get_name(), entry.key)
+    return hk, had_bad
+
+
+def _atomic_save_hostkeys(hk: paramiko.HostKeys) -> None:
+    """Write *hk* to KNOWN_HOSTS_PATH atomically (temp file + rename).
+
+    An atomic rename means a reader (even in another process) never sees a
+    half-written file — eliminating the interleaved-write corruption that broke
+    auth for whole batches of hosts.
+    """
+    tmp = f"{KNOWN_HOSTS_PATH}.tmp.{os.getpid()}.{threading.get_ident()}"
+    try:
+        hk.save(tmp)
+        os.replace(tmp, KNOWN_HOSTS_PATH)
+    finally:
+        try:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        except OSError:
+            pass
+
+
 def _save_known_hosts(client: paramiko.SSHClient) -> None:
     """Merge a client's trusted host keys into the shared file, serialized.
 
-    Merging (rather than overwriting via save_host_keys) means parallel workers
-    accumulate every host's key instead of clobbering one another, and a
-    previously-corrupted file is rebuilt cleanly from the entries that still
-    parse.
+    Merging (rather than overwriting) means parallel workers accumulate every
+    host's key instead of clobbering one another; the existing file is scrubbed
+    of corrupt lines first, and the result is written atomically.
     """
     with _HOSTKEY_LOCK:
         try:
-            merged = paramiko.HostKeys()
-            if os.path.exists(KNOWN_HOSTS_PATH):
-                try:
-                    merged.load(KNOWN_HOSTS_PATH)
-                except Exception:
-                    merged = paramiko.HostKeys()  # corrupted → start fresh
+            merged, _ = _read_known_hosts_scrubbed()
             keys = client.get_host_keys()
             for hostname in keys:
                 for keytype, key in keys[hostname].items():
                     merged.add(hostname, keytype, key)
-            merged.save(KNOWN_HOSTS_PATH)
+            _atomic_save_hostkeys(merged)
         except Exception:
             pass
 
 
 def _make_client(strict: bool) -> paramiko.SSHClient:
     client = paramiko.SSHClient()
-    # Load any previously-trusted hosts (under the lock so a concurrent save
-    # can't have the file half-written while we read it).
+    # Load any previously-trusted hosts. We parse the file ourselves (see
+    # _read_known_hosts_scrubbed) so a single corrupt line can't break connect,
+    # and self-heal the file when corruption is found. All under the lock so a
+    # concurrent save can't be mid-write while we read.
     try:
         client.load_system_host_keys()
     except Exception:
         pass
-    if os.path.exists(KNOWN_HOSTS_PATH):
-        with _HOSTKEY_LOCK:
-            try:
-                client.load_host_keys(KNOWN_HOSTS_PATH)
-            except Exception:
-                # A previously-corrupted file: start fresh in memory. The next
-                # _save_known_hosts overwrites the bad file with clean content.
-                pass
+    with _HOSTKEY_LOCK:
+        try:
+            hk, had_bad = _read_known_hosts_scrubbed()
+            ck = client.get_host_keys()
+            for hostname in hk:
+                for keytype, key in hk[hostname].items():
+                    ck.add(hostname, keytype, key)
+            if had_bad:
+                _atomic_save_hostkeys(hk)  # rewrite clean, dropping bad lines
+        except Exception:
+            pass
     if strict:
         client.set_missing_host_key_policy(paramiko.RejectPolicy())
     else:
@@ -3248,6 +3317,15 @@ def deploy_host(
         return HostResult(target.label, False, "connect", f"unexpected error: {e}",
                           duration_s=time.time() - start)
 
+    # With the read timeout effectively unlimited, keepalive is what detects a
+    # dropped connection (otherwise a dead socket would hang a worker forever).
+    try:
+        tr = client.get_transport()
+        if tr is not None:
+            tr.set_keepalive(30)
+    except Exception:
+        pass
+
     # Persist host key learned via TOFU (serialized — see _save_known_hosts).
     if not cfg.strict_host_keys:
         _save_known_hosts(client)
@@ -3280,10 +3358,10 @@ def deploy_host(
         # "bad command name sh". Instead we run the script text directly as
         # console command(s) and read the result back.
         if interpreter == "routeros":
-            stdin, stdout, stderr = client.exec_command(script, timeout=cfg.exec_timeout)
+            stdin, stdout, stderr = client.exec_command(script, timeout=cfg.connect_timeout)
             stdout.channel.set_combine_stderr(True)
             chan = stdout.channel
-            chan.settimeout(cfg.exec_timeout)
+            chan.settimeout(_EXEC_NO_TIMEOUT)
             ros_chunks: List[str] = []
             try:
                 for raw in stdout:
@@ -3316,7 +3394,7 @@ def deploy_host(
             # ---- Root-escalation path via su + PTY ----------------------------
             try:
                 output, exit_status = _exec_with_su(
-                    client, script, interpreter, root_password, cfg.exec_timeout,
+                    client, script, interpreter, root_password, _EXEC_NO_TIMEOUT,
                     log_callback=log_callback,
                 )
             except socket.timeout:
@@ -3346,14 +3424,14 @@ def deploy_host(
 
         # ---- Normal (non-root-escalated) path ---------------------------------
         # Pipe the script via stdin so nothing touches argv/process list.
-        stdin, stdout, stderr = client.exec_command(interpreter, timeout=cfg.exec_timeout)
+        stdin, stdout, stderr = client.exec_command(interpreter, timeout=cfg.connect_timeout)
         # Merge stderr into stdout so we stream both channels in one pass.
         stdout.channel.set_combine_stderr(True)
         stdin.write(script)
         stdin.channel.shutdown_write()
 
         chan = stdout.channel
-        chan.settimeout(cfg.exec_timeout)
+        chan.settimeout(_EXEC_NO_TIMEOUT)
         out_chunks: List[str] = []
         try:
             # Read line-by-line so log_callback gets each line as it arrives

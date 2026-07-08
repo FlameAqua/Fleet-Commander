@@ -1,10 +1,16 @@
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import { downloadBlob } from '../../lib/file'
 import type { DeployRun, HostCard } from './useDeployRun'
 import './run.css'
 
 function displayHost(label: string): string {
   return label.replace(/^ssh:\/\/[^@]+@/, '').replace(/:\d+$/, '')
+}
+
+/** The bare host/URL of a result, for copying. */
+function hostUrl(label: string): string {
+  return label.replace(/^ssh:\/\//, '')
 }
 
 function safeName(label: string): string {
@@ -53,13 +59,32 @@ interface Props {
   onFallback: () => void
   /** Provided only for Test-host runs — re-prompt for the password. */
   onReenterPassword?: () => void
+  /** Abort the in-flight run. */
+  onStop: () => void
+  /** Optional per-host title/account (label → title). */
+  titles?: Record<string, string>
 }
 
-export function ResultsPanel({ run, onFallback, onReenterPassword }: Props) {
+export function ResultsPanel({ run, onFallback, onReenterPassword, onStop, titles = {} }: Props) {
   const { status, meta, fatal, cards, failedLabels } = run
+  const [openSet, setOpenSet] = useState<Set<string>>(new Set())
+  const [ctx, setCtx] = useState<{ x: number; y: number; title: string; url: string } | null>(null)
   if (status === 'idle' && !cards.length && !fatal) return null
   // Show "Re-enter password" when a failure is an authentication failure.
   const hasAuthFailure = cards.some((c) => c.status === 'fail' && c.stage === 'auth')
+  const allOpen = cards.length > 0 && cards.every((c) => openSet.has(c.label))
+
+  function toggleCard(label: string) {
+    setOpenSet((s) => {
+      const next = new Set(s)
+      if (next.has(label)) next.delete(label)
+      else next.add(label)
+      return next
+    })
+  }
+  function toggleAll() {
+    setOpenSet(allOpen ? new Set() : new Set(cards.map((c) => c.label)))
+  }
 
   const byOutcome = {
     success: cards.filter((c) => outcomeOf(c) === 'success'),
@@ -128,30 +153,127 @@ export function ResultsPanel({ run, onFallback, onReenterPassword }: Props) {
 
       <div className="results__cards">
         {cards.map((c) => (
-          <Card key={c.label} card={c} onExport={() => exportOne(c)} />
+          <Card
+            key={c.label}
+            card={c}
+            title={titles[c.label]}
+            open={openSet.has(c.label)}
+            onToggle={() => toggleCard(c.label)}
+            onExport={() => exportOne(c)}
+            onContext={(x, y, title, url) => setCtx({ x, y, title, url })}
+          />
         ))}
       </div>
 
-      {status === 'done' && failedLabels.length > 0 && (
-        <div className="results__fallback">
-          <button type="button" className="run__btn" onClick={onFallback}>
-            Retry {failedLabels.length} failed host{failedLabels.length === 1 ? '' : 's'}
-          </button>
-          {onReenterPassword && hasAuthFailure && (
-            <button type="button" className="run__btn" onClick={onReenterPassword}>
-              🔑 Re-enter password
+      {cards.length > 0 && (
+        <div className="results__controls">
+          {status === 'running' && (
+            <button type="button" className="run__btn" onClick={onStop}>
+              ■ Stop
             </button>
           )}
+          <button type="button" className="run__btn" onClick={toggleAll}>
+            {allOpen ? 'Collapse all' : 'Expand all'}
+          </button>
+          <button
+            type="button"
+            className="run__btn"
+            onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+          >
+            ↑ Back to top
+          </button>
+          {status === 'done' && failedLabels.length > 0 && (
+            <>
+              <button type="button" className="run__btn" onClick={onFallback}>
+                Retry {failedLabels.length} failed host{failedLabels.length === 1 ? '' : 's'}
+              </button>
+              {onReenterPassword && hasAuthFailure && (
+                <button type="button" className="run__btn" onClick={onReenterPassword}>
+                  🔑 Re-enter password
+                </button>
+              )}
+            </>
+          )}
         </div>
+      )}
+
+      {ctx && (
+        <CardContextMenu
+          x={ctx.x}
+          y={ctx.y}
+          title={ctx.title}
+          url={ctx.url}
+          onClose={() => setCtx(null)}
+        />
       )}
     </section>
   )
 }
 
-function Card({ card, onExport }: { card: HostCard; onExport: () => void }) {
-  const [open, setOpen] = useState(false)
+function CardContextMenu({
+  x,
+  y,
+  title,
+  url,
+  onClose,
+}: {
+  x: number
+  y: number
+  title: string
+  url: string
+  onClose: () => void
+}) {
+  const copy = (text: string) => {
+    navigator.clipboard?.writeText(text).catch(() => {})
+    onClose()
+  }
+  return createPortal(
+    <>
+      <div
+        className="cardctx__backdrop"
+        onClick={onClose}
+        onContextMenu={(e) => {
+          e.preventDefault()
+          onClose()
+        }}
+      />
+      <ul className="cardctx" style={{ left: x, top: y }} role="menu">
+        {title && (
+          <li>
+            <button type="button" onClick={() => copy(title)}>
+              Copy title
+            </button>
+          </li>
+        )}
+        <li>
+          <button type="button" onClick={() => copy(url)}>
+            Copy URL
+          </button>
+        </li>
+      </ul>
+    </>,
+    document.body,
+  )
+}
+
+function Card({
+  card,
+  title,
+  open,
+  onToggle,
+  onExport,
+  onContext,
+}: {
+  card: HostCard
+  title?: string
+  open: boolean
+  onToggle: () => void
+  onExport: () => void
+  onContext: (x: number, y: number, title: string, url: string) => void
+}) {
   const body = card.output != null ? card.output : card.lines.join('\n')
   const outcome = outcomeOf(card)
+  const host = displayHost(card.label)
   const meta = [
     card.stage,
     card.exitStatus != null ? `exit ${card.exitStatus}` : null,
@@ -164,13 +286,25 @@ function Card({ card, onExport }: { card: HostCard; onExport: () => void }) {
   return (
     <div className={`card card--${outcome}`}>
       <div className="card__head">
-        <button type="button" className="card__toggle" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+        {/* Selectable + right-click "Copy title / Copy URL". Toggles on click
+            (dragging to select text doesn't fire a click). If there's an active
+            selection, defer to the native copy menu instead. */}
+        <div
+          className="card__headmain"
+          onClick={onToggle}
+          onContextMenu={(e) => {
+            if (window.getSelection()?.toString().trim()) return
+            e.preventDefault()
+            onContext(e.clientX, e.clientY, title ?? host, hostUrl(card.label))
+          }}
+        >
           <span className={`card__dot card__dot--${outcome}`} />
-          <span className="card__host">{displayHost(card.label)}</span>
+          {title && <span className="card__title">{title}</span>}
+          <span className="card__host">{host}</span>
           <span className="card__msg">{card.message || statusText(card.status)}</span>
           {meta && <span className="card__meta">{meta}</span>}
           <span className="card__chev">{open ? '▾' : '▸'}</span>
-        </button>
+        </div>
         {done && (
           <button type="button" className="card__dl" title="Export this system's log" onClick={onExport}>
             <ExportIcon />

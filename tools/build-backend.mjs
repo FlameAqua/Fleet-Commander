@@ -1,7 +1,8 @@
 // Build the Fleet Commander backend sidecar with PyInstaller, using the
-// backend venv. Produces backend/dist/fleet-commander-backend(.exe), which
-// electron-builder ships as an extraResource. Run on each target OS (PyInstaller
-// does not cross-compile).
+// backend venv. Produces a ONEDIR bundle at backend/dist/fleet-commander-backend/
+// (launcher exe + unpacked deps), which electron-builder ships as an
+// extraResource. Onedir avoids the multi-second onefile temp-unpack on every
+// launch. Run on each target OS (PyInstaller does not cross-compile).
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import path from 'node:path'
@@ -34,7 +35,8 @@ const child = spawn(
 )
 child.on('exit', (code) => {
   if (code === 0) {
-    const out = path.join(backendDir, 'dist', isWin ? 'fleet-commander-backend.exe' : 'fleet-commander-backend')
+    const dir = path.join(backendDir, 'dist', 'fleet-commander-backend')
+    const out = path.join(dir, isWin ? 'fleet-commander-backend.exe' : 'fleet-commander-backend')
     console.log(`[build:backend] done → ${out}`)
   }
   process.exit(code ?? 0)

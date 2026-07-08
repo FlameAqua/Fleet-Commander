@@ -197,30 +197,79 @@ def _script_path(scripts_dir: str, name: str) -> str:
     return os.path.join(scripts_dir, name)
 
 
+# Categories are single-level subdirectories of the scripts folder. '' means
+# the default (root) category. Names allow letters/digits/space/._- , no
+# leading dot, max 64 chars — and os.path.basename() strips any path parts so a
+# category can never escape the scripts directory.
+_CATEGORY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._ -]{0,63}$")
+
+
+def _sanitize_category(cat) -> str:
+    """Reduce *cat* to a safe subdirectory name, or '' for the default category."""
+    if not cat:
+        return ""
+    c = os.path.basename(str(cat).strip())
+    if not c or c.startswith(".") or not _CATEGORY_RE.match(c):
+        return ""
+    return c
+
+
+def _category_dir(scripts_dir: str, category: str, create: bool = False) -> str:
+    """Resolve *category* under *scripts_dir*. '' → the root dir itself."""
+    if not category:
+        return scripts_dir
+    d = os.path.join(scripts_dir, category)
+    if create:
+        os.makedirs(d, exist_ok=True)
+    return d
+
+
+def _get_category() -> str:
+    """Read + sanitize the `category` field from the current request."""
+    raw = request.args.get("category")
+    if raw is None:
+        raw = request.form.get("category", "")
+    return _sanitize_category(raw)
+
+
 @app.route("/api/scripts", methods=["GET"])
 def list_scripts():
-    """Return a sorted list of saved scripts with size + modified time."""
+    """
+    Return saved scripts (with size, modified time, and category) plus the list
+    of categories. Categories are single-level subdirectories of the scripts
+    folder; the root folder is the default category (reported as "").
+    """
     try:
         scripts_dir = _get_scripts_dir()
     except ValueError as e:
-        return jsonify({"ok": False, "error": str(e), "dir": ""}), 400
+        return jsonify({"ok": False, "error": str(e), "dir": "", "scripts": [], "categories": []}), 400
     try:
         items = []
-        for name in sorted(os.listdir(scripts_dir)):
-            path = os.path.join(scripts_dir, name)
-            if not os.path.isfile(path):
-                continue
-            if not name.lower().endswith(".sh"):
-                continue
-            st = os.stat(path)
-            items.append({
-                "name": name,
-                "size": st.st_size,
-                "modified": int(st.st_mtime),
-            })
-        return jsonify({"ok": True, "scripts": items, "dir": scripts_dir})
+
+        def _scan(dir_path, category):
+            for name in sorted(os.listdir(dir_path)):
+                path = os.path.join(dir_path, name)
+                if not os.path.isfile(path) or not name.lower().endswith(".sh"):
+                    continue
+                st = os.stat(path)
+                items.append({
+                    "name": name,
+                    "category": category,
+                    "size": st.st_size,
+                    "modified": int(st.st_mtime),
+                })
+
+        _scan(scripts_dir, "")  # default (root) category
+        categories = []
+        for entry in sorted(os.listdir(scripts_dir)):
+            sub = os.path.join(scripts_dir, entry)
+            # Only surface clean, single-level subdirectories as categories.
+            if os.path.isdir(sub) and _sanitize_category(entry) == entry:
+                categories.append(entry)
+                _scan(sub, entry)
+        return jsonify({"ok": True, "scripts": items, "categories": categories, "dir": scripts_dir})
     except Exception as e:  # noqa: BLE001
-        return jsonify({"ok": False, "error": str(e), "dir": scripts_dir}), 500
+        return jsonify({"ok": False, "error": str(e), "dir": scripts_dir, "scripts": [], "categories": []}), 500
 
 
 @app.route("/api/scripts/<path:name>", methods=["GET"])
@@ -233,7 +282,8 @@ def get_script(name):
         scripts_dir = _get_scripts_dir()
     except ValueError as e:
         return jsonify({"ok": False, "error": str(e)}), 400
-    path = _script_path(scripts_dir, safe)
+    category = _get_category()
+    path = _script_path(_category_dir(scripts_dir, category), safe)
     if not os.path.isfile(path):
         return jsonify({"ok": False, "error": "not found"}), 404
     try:
@@ -242,6 +292,7 @@ def get_script(name):
         return jsonify({
             "ok": True,
             "name": safe,
+            "category": category,
             "content": raw.decode("utf-8", errors="replace"),
         })
     except Exception as e:  # noqa: BLE001
@@ -258,7 +309,8 @@ def delete_script(name):
         scripts_dir = _get_scripts_dir()
     except ValueError as e:
         return jsonify({"ok": False, "error": str(e)}), 400
-    path = _script_path(scripts_dir, safe)
+    category = _get_category()
+    path = _script_path(_category_dir(scripts_dir, category), safe)
     if not os.path.isfile(path):
         return jsonify({"ok": False, "error": "not found"}), 404
     try:
@@ -297,10 +349,11 @@ def save_script():
         scripts_dir = _get_scripts_dir()
     except ValueError as e:
         return jsonify({"ok": False, "error": str(e)}), 400
+    category = _get_category()
     try:
         # Atomic write: write to a temp file then rename. Avoids leaving a
         # half-written script on disk if the process dies mid-write.
-        path = _script_path(scripts_dir, safe)
+        path = _script_path(_category_dir(scripts_dir, category, create=True), safe)
         tmp  = path + ".tmp"
         with open(tmp, "wb") as f:
             f.write(body)
@@ -309,9 +362,97 @@ def save_script():
         return jsonify({
             "ok": True,
             "name": safe,
+            "category": category,
             "size": st.st_size,
             "modified": int(st.st_mtime),
         })
+    except Exception as e:  # noqa: BLE001
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/scripts/category", methods=["POST"])
+def create_category():
+    """Create a new category (a subdirectory of the scripts folder)."""
+    try:
+        scripts_dir = _get_scripts_dir()
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    name = _sanitize_category(request.form.get("name", ""))
+    if not name:
+        return jsonify({
+            "ok": False,
+            "error": ("invalid category name — use letters, digits, spaces, "
+                      "dots, dashes, underscores; no leading dot; max 64 chars"),
+        }), 400
+    try:
+        os.makedirs(os.path.join(scripts_dir, name), exist_ok=True)
+        return jsonify({"ok": True, "category": name})
+    except Exception as e:  # noqa: BLE001
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/scripts/category", methods=["DELETE"])
+def delete_category():
+    """
+    Remove a category. Its scripts fall back to the default (General) category —
+    they are moved to the root scripts folder first, then the now-empty
+    subdirectory is removed. The default category (empty name) cannot be deleted.
+    """
+    try:
+        scripts_dir = _get_scripts_dir()
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    name = _sanitize_category(request.args.get("name", ""))
+    if not name:
+        return jsonify({"ok": False, "error": "the default category cannot be deleted"}), 400
+    d = os.path.join(scripts_dir, name)
+    if not os.path.isdir(d):
+        return jsonify({"ok": False, "error": "category not found"}), 404
+    moved = 0
+    try:
+        for fname in sorted(os.listdir(d)):
+            src = os.path.join(d, fname)
+            if not os.path.isfile(src) or not fname.lower().endswith(".sh"):
+                continue
+            # Fall back to General, avoiding clobbering a same-named script there.
+            base, ext = os.path.splitext(fname)
+            dst = os.path.join(scripts_dir, fname)
+            i = 1
+            while os.path.exists(dst):
+                dst = os.path.join(scripts_dir, f"{base}-{i}{ext}")
+                i += 1
+            os.replace(src, dst)
+            moved += 1
+        try:
+            os.rmdir(d)  # only succeeds once empty
+        except OSError:
+            pass
+        return jsonify({"ok": True, "moved": moved})
+    except Exception as e:  # noqa: BLE001
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/scripts/move", methods=["POST"])
+def move_script():
+    """Move a saved script from one category to another (form: name, from, to)."""
+    try:
+        scripts_dir = _get_scripts_dir()
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    safe = _sanitize_script_name(request.form.get("name", ""))
+    if not safe:
+        return jsonify({"ok": False, "error": "invalid script name"}), 400
+    from_cat = _sanitize_category(request.form.get("from_category", ""))
+    to_cat = _sanitize_category(request.form.get("to_category", ""))
+    src = _script_path(_category_dir(scripts_dir, from_cat), safe)
+    if not os.path.isfile(src):
+        return jsonify({"ok": False, "error": "not found"}), 404
+    if from_cat == to_cat:
+        return jsonify({"ok": True, "name": safe, "category": to_cat})
+    try:
+        dst = _script_path(_category_dir(scripts_dir, to_cat, create=True), safe)
+        os.replace(src, dst)  # atomic; overwrites a same-named script in the target
+        return jsonify({"ok": True, "name": safe, "category": to_cat})
     except Exception as e:  # noqa: BLE001
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -560,6 +701,30 @@ def encrypt_csv_endpoint():
             "Cache-Control": "no-store",
         },
     )
+
+
+@app.route("/api/delete-csv-file", methods=["POST"])
+def delete_csv_file_endpoint():
+    """
+    Delete a plaintext CSV from disk by absolute path. Used after a successful
+    encrypt-on-import so the cleartext copy doesn't linger. Guardrails: the
+    target must be an existing regular file with a .csv extension (never .enc,
+    never a directory) — this endpoint can't be used to wipe arbitrary files.
+    """
+    data = request.get_json(silent=True) or {}
+    raw = str(data.get("path", "")).strip()
+    if not raw:
+        return jsonify({"ok": False, "error": "No path given."}), 400
+    path = os.path.abspath(os.path.expanduser(raw))
+    if os.path.splitext(path)[1].lower() != ".csv":
+        return jsonify({"ok": False, "error": "Refusing to delete a non-.csv file."}), 400
+    if not os.path.isfile(path):
+        return jsonify({"ok": False, "error": "File not found."}), 404
+    try:
+        os.remove(path)
+    except OSError as e:
+        return jsonify({"ok": False, "error": f"Couldn't delete file: {e}"}), 500
+    return jsonify({"ok": True})
 
 
 @app.route("/api/help", methods=["GET"])
@@ -1078,27 +1243,50 @@ def _resolve_targets_creds(mode):
 def auth_check():
     """
     Connect-only SSH auth test for the selected systems. Same multipart form as
-    /api/deploy (mode + CSVs + test_password). Returns per-host pass/fail so the
-    operator can verify credentials before preparing or running an action.
+    /api/deploy (mode + CSVs + test_password). Streams per-host pass/fail as
+    NDJSON so the modal can fill in live as each host is checked:
+      {"type":"meta","total":N}
+      {"type":"result","label":..,"ok":..,"error":..}   (one per host)
+      {"type":"done","passed":P,"total":N}
+      {"type":"fatal","message":..}                       (pre-run failure)
     """
     mode = (request.form.get("mode") or "universal").strip()
     cfg = _build_config(request.form)
     targets, creds, parse_errors, fatal = _resolve_targets_creds(mode)
     if fatal:
-        return jsonify({"ok": False, "error": fatal}), 400
+        return Response(_event({"type": "fatal", "message": fatal}),
+                        mimetype="application/x-ndjson")
     if not targets:
-        return jsonify({"ok": False, "error": "No systems found. " + " | ".join(parse_errors)}), 400
+        return Response(
+            _event({"type": "fatal",
+                    "message": "No systems found. " + " | ".join(parse_errors)}),
+            mimetype="application/x-ndjson")
 
-    def _one(t):
-        ok, err = deployer.check_auth(t, creds.get(t.label, ""), cfg)
-        return {"label": t.label, "ok": ok, "error": err}
+    def generate():
+        yield _event({"type": "meta", "total": len(targets)})
+        event_q = _queue_mod.Queue()
 
-    results: List[dict] = []
-    with ThreadPoolExecutor(max_workers=min(10, len(targets))) as pool:
-        results = list(pool.map(_one, targets))
+        def _run(t):
+            ok, err = deployer.check_auth(t, creds.get(t.label, ""), cfg)
+            event_q.put({"type": "result", "label": t.label, "ok": ok, "error": err})
 
-    passed = sum(1 for r in results if r["ok"])
-    return jsonify({"ok": True, "results": results, "passed": passed, "total": len(results)})
+        passed = 0
+        done = 0
+        with ThreadPoolExecutor(max_workers=min(10, len(targets))) as pool:
+            for t in targets:
+                pool.submit(_run, t)
+            while done < len(targets):
+                try:
+                    ev = event_q.get(timeout=1.0)
+                except _queue_mod.Empty:
+                    continue
+                done += 1
+                if ev["ok"]:
+                    passed += 1
+                yield _event(ev)
+        yield _event({"type": "done", "passed": passed, "total": len(targets)})
+
+    return Response(stream_with_context(generate()), mimetype="application/x-ndjson")
 
 
 @app.route("/api/deploy", methods=["POST"])

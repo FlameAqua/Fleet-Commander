@@ -84,6 +84,27 @@ export function restrictToHosts(source: SourceState, labels: string[]): SourceSt
   return source
 }
 
+/** Deselect (exclude) the given host labels from the current selection. */
+export function deselectHosts(source: SourceState, labels: string[]): SourceState {
+  if (!labels.length) return source
+  const drop = new Set(labels)
+  if (source.mode === 'compound') {
+    const ex = new Set(source.excluded)
+    for (const l of labels) ex.add(l)
+    return { ...source, excluded: [...ex] }
+  }
+  if (source.mode === 'manual') {
+    return {
+      ...source,
+      rows: source.rows.filter((r) => {
+        const l = manualLabel(r.url, r.user)
+        return l === null || !drop.has(l)
+      }),
+    }
+  }
+  return source
+}
+
 /** Restrict a source so a run only targets the single given host label. */
 export function restrictToHost(source: SourceState, label: string): SourceState {
   if (source.mode === 'compound') {

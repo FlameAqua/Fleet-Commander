@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { ScriptsPanel } from '../scripts/ScriptsPanel'
 import { Segmented } from '../../components/Segmented'
 import { ScriptEditor } from '../../components/ScriptEditor'
@@ -63,10 +64,20 @@ interface Props {
   onChange: (v: CustomScriptState) => void
   /** Per-system variables from the loaded Compound CSV (for `$` autocomplete). */
   variables: string[]
+  /** True when the source is an imported CSV — enables the per-host root column. */
+  csvAvailable: boolean
 }
 
-export function CustomScriptPanel({ value, onChange, variables }: Props) {
+export function CustomScriptPanel({ value, onChange, variables, csvAvailable }: Props) {
   const set = (patch: Partial<CustomScriptState>) => onChange({ ...value, ...patch })
+
+  // The "root password from a CSV column" mode only makes sense with an
+  // imported CSV. If the source changes away from CSV while it's selected,
+  // fall back to the current SSH user.
+  useEffect(() => {
+    if (!csvAvailable && value.rootMode === 'csv') set({ rootMode: 'none' })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [csvAvailable, value.rootMode])
 
   async function onUpload(file: File | null) {
     if (!file) {
@@ -95,7 +106,6 @@ export function CustomScriptPanel({ value, onChange, variables }: Props) {
           value={value.paste}
           onChange={(v) => set({ paste: v })}
           variables={variables}
-          placeholder={'#!/bin/bash\nset -e\necho "Hello from $(hostname)"'}
           interpreter={value.interpreter}
           onInterpreterChange={(i) => set({ interpreter: i })}
         />
@@ -127,7 +137,7 @@ export function CustomScriptPanel({ value, onChange, variables }: Props) {
               checked={value.rootMode === 'none'}
               onChange={() => set({ rootMode: 'none' })}
             />
-            The SSH login user (no escalation)
+            Current SSH user
           </label>
         <label className="cs__radio">
           <input
@@ -136,7 +146,7 @@ export function CustomScriptPanel({ value, onChange, variables }: Props) {
             checked={value.rootMode === 'inline'}
             onChange={() => set({ rootMode: 'inline' })}
           />
-          root — same password for all hosts
+          Root (input same root password for all hosts)
         </label>
         {value.rootMode === 'inline' && (
           <input
@@ -148,24 +158,28 @@ export function CustomScriptPanel({ value, onChange, variables }: Props) {
             onChange={(e) => set({ rootPassword: e.target.value })}
           />
         )}
-        <label className="cs__radio">
-          <input
-            type="radio"
-            name="cs-root"
-            checked={value.rootMode === 'csv'}
-            onChange={() => set({ rootMode: 'csv' })}
-          />
-          root — per-host password from a CSV column
-        </label>
-        {value.rootMode === 'csv' && (
-          <input
-            className="cs__rootinput"
-            type="text"
-            placeholder="RootPassword"
-            value={value.rootColumn}
-            onChange={(e) => set({ rootColumn: e.target.value })}
-            spellCheck={false}
-          />
+        {csvAvailable && (
+          <>
+            <label className="cs__radio">
+              <input
+                type="radio"
+                name="cs-root"
+                checked={value.rootMode === 'csv'}
+                onChange={() => set({ rootMode: 'csv' })}
+              />
+              Root (take root password from a CSV column)
+            </label>
+            {value.rootMode === 'csv' && (
+              <input
+                className="cs__rootinput"
+                type="text"
+                placeholder="CSV column to read from"
+                value={value.rootColumn}
+                onChange={(e) => set({ rootColumn: e.target.value })}
+                spellCheck={false}
+              />
+            )}
+          </>
         )}
           <p className="run__note">
             Escalation uses <code>su</code> with the root password (no sudoers needed). The password is held in

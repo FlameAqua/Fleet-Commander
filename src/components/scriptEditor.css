@@ -42,16 +42,16 @@
   color: var(--accent);
   border-color: var(--accent);
 }
-/* Interpreter (cmd) icon — sits just left of the help `?` */
+/* Interpreter (cmd) icon — circular, matching the help `?` just to its right */
 .se .se__cmd {
   position: absolute;
   top: 8px;
   right: 40px;
   z-index: 3;
-  width: 22px;
+  width: 20px;
   height: 20px;
   padding: 0;
-  border-radius: 5px;
+  border-radius: 50%;
   border: 1px solid var(--border);
   background: var(--panel);
   color: var(--muted);

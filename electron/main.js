@@ -1,6 +1,6 @@
 import { app, BrowserWindow, Menu, ipcMain, shell } from 'electron'
 import electronUpdater from 'electron-updater'
-import { spawn } from 'child_process'
+import { spawn, spawnSync } from 'child_process'
 import fs from 'node:fs'
 import http from 'http'
 import path from 'path'
@@ -51,8 +51,10 @@ function backendCommand () {
       : path.join(backendDir, '.venv', 'bin', 'python')
     return { cmd: venvPython, args: ['app.py'], cwd: backendDir, spaDir: null }
   }
-  // Prod: a PyInstaller binary + the built SPA, both shipped as extraResources.
-  const backendDir = path.join(process.resourcesPath, 'backend')
+  // Prod: a PyInstaller ONEDIR bundle + the built SPA, both shipped as
+  // extraResources. The onedir bundle lands at resources/backend/
+  // fleet-commander-backend/ with the launcher exe inside it.
+  const backendDir = path.join(process.resourcesPath, 'backend', 'fleet-commander-backend')
   const binName = isWindows ? 'fleet-commander-backend.exe' : 'fleet-commander-backend'
   return {
     cmd: path.join(backendDir, binName),
@@ -90,20 +92,39 @@ function startBackend () {
   })
 }
 
+const BACKEND_BIN = isWindows ? 'fleet-commander-backend.exe' : 'fleet-commander-backend'
+
 function stopBackend () {
-  if (!backend || backend.killed) return
-  // On Windows a plain kill() can leave the python process orphaned; use
-  // taskkill to take down the whole tree.
-  if (isWindows && backend.pid) {
+  const proc = backend
+  backend = null
+  if (!proc || proc.killed) return
+  // Use a SYNCHRONOUS kill: on quit/will-install we must finish before the
+  // process exits, otherwise the backend is orphaned on port 8765 (which then
+  // makes the installer think the app is still running). taskkill /T takes
+  // down the whole tree (the PyInstaller bootloader + its python child).
+  if (isWindows && proc.pid) {
     try {
-      spawn('taskkill', ['/pid', String(backend.pid), '/T', '/F'])
-    } catch (e) {
-      backend.kill()
+      spawnSync('taskkill', ['/pid', String(proc.pid), '/T', '/F'], { timeout: 5000 })
+    } catch {
+      try { proc.kill() } catch {}
     }
   } else {
-    backend.kill('SIGTERM')
+    try { proc.kill('SIGTERM') } catch {}
   }
-  backend = null
+}
+
+/** Prod-only: kill any orphaned backend exe (e.g. left by a crash or upgrade)
+ *  so we don't end up talking to a stale, outdated sidecar on our port. */
+function killStaleBackend () {
+  try {
+    if (isWindows) {
+      spawnSync('taskkill', ['/F', '/T', '/IM', BACKEND_BIN], { timeout: 5000 })
+    } else {
+      spawnSync('pkill', ['-f', BACKEND_BIN], { timeout: 5000 })
+    }
+  } catch {
+    /* nothing to kill */
+  }
 }
 
 /** Quick one-shot check: is a backend already answering on the port? */
@@ -194,6 +215,9 @@ function createWindow () {
   mainWindow.webContents.on('context-menu', (_e, params) => {
     const { editFlags, isEditable, selectionText } = params
     const hasSelection = !!selectionText
+    // Only show the native menu for editable fields or an active text selection;
+    // otherwise let the app's own DOM menus (e.g. result "Copy title/URL") handle it.
+    if (!isEditable && !hasSelection) return
     const menu = Menu.buildFromTemplate([
       { role: 'cut', enabled: isEditable && editFlags.canCut },
       { role: 'copy', enabled: editFlags.canCopy && hasSelection },
@@ -203,6 +227,27 @@ function createWindow () {
     ])
     menu.popup({ window: mainWindow })
   })
+
+  // Navigation lockdown (defense-in-depth for a credential-handling app): this
+  // window only ever shows our own app origin. Block any attempt to navigate
+  // away from it or to spawn child windows — injected/remote content must never
+  // be able to load inside a context that carries the preload bridge. Genuine
+  // external https links are handed to the OS browser instead.
+  const appOrigin = new URL(isDev ? VITE_DEV_SERVER_URL : BACKEND_URL).origin
+  mainWindow.webContents.on('will-navigate', (e, url) => {
+    let origin = ''
+    try { origin = new URL(url).origin } catch { /* malformed → block */ }
+    if (origin !== appOrigin) {
+      e.preventDefault()
+      if (/^https?:\/\//i.test(url)) shell.openExternal(url)
+    }
+  })
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url)
+    return { action: 'deny' }
+  })
+  // No <webview> is used; refuse any attempt to attach one.
+  mainWindow.webContents.on('will-attach-webview', (e) => e.preventDefault())
 }
 
 // ---------------------------------------------------------------------------
@@ -251,11 +296,21 @@ app.whenReady().then(async () => {
   // No application menu (File/Edit/View/Window) — this is a focused tool UI.
   Menu.setApplicationMenu(null)
   // In dev the backend is started by `npm run dev` (the `dev:backend` process),
-  // so don't double-spawn it. In a packaged build nothing else runs it, so we
-  // spawn it here and own its lifecycle.
-  if (await isBackendUp()) {
-    console.log('[flask] already running — not spawning')
+  // so don't double-spawn it. In a packaged build WE own the backend — any
+  // sidecar already on the port is a stale orphan (crash / improper close /
+  // mid-upgrade), so take it down and start our own (correct-version) one.
+  if (isDev) {
+    if (await isBackendUp()) {
+      console.log('[flask] already running (dev) — not spawning')
+    } else {
+      startBackend()
+    }
   } else {
+    if (await isBackendUp()) {
+      console.log('[flask] stale backend on port — killing and restarting')
+      killStaleBackend()
+      await new Promise((r) => setTimeout(r, 600)) // let the port free up
+    }
     startBackend()
   }
   try {
@@ -294,10 +349,18 @@ ipcMain.on('fc:open-external', (_e, url) => {
 
 // Open a local folder in the OS file manager. Done from the app process (not
 // the hidden Flask backend) so Explorer comes to the foreground instead of
-// opening silently behind the window.
+// opening silently behind the window. Restricted to existing DIRECTORIES:
+// shell.openPath on a file launches it with its default handler (a .exe would
+// execute), so refusing non-directories keeps a compromised renderer from
+// turning this bridge into an arbitrary-file launcher.
 ipcMain.handle('fc:open-path', async (_e, p) => {
-  if (typeof p === 'string' && p) return shell.openPath(p)
-  return 'invalid path'
+  if (typeof p !== 'string' || !p) return 'invalid path'
+  try {
+    if (!fs.statSync(p).isDirectory()) return 'not a directory'
+  } catch {
+    return 'path not found'
+  }
+  return shell.openPath(p)
 })
 
 // Synchronous version lookup for the preload bridge.
@@ -317,7 +380,10 @@ ipcMain.on('fc:update:check', (e) => {
   autoUpdater.checkForUpdates().catch((err) => console.error('[update]', err))
 })
 ipcMain.on('fc:update:install', () => {
-  if (!isDev) autoUpdater.quitAndInstall()
+  if (!isDev) {
+    stopBackend() // free the port + unlock the exe before the installer runs
+    autoUpdater.quitAndInstall()
+  }
 })
 
 app.on('before-quit', stopBackend)

@@ -36,6 +36,17 @@ function caretXY(ta: HTMLTextAreaElement, index: number): { left: number; top: n
 
 type Interpreter = 'auto' | 'routeros'
 
+// Placeholder examples per interpreter. When the interpreter picker is shown,
+// switching it swaps these so RouterOS users see MikroTik-style examples.
+const PLACEHOLDERS: Record<Interpreter, string> = {
+  auto: '#!/bin/bash\nset -e\necho "Hello from $(hostname)"',
+  routeros:
+    '# RouterOS — commands run straight on the MikroTik console\n' +
+    '/system resource print\n' +
+    '/system identity print\n' +
+    '/interface print',
+}
+
 interface Props {
   value: string
   onChange: (v: string) => void
@@ -99,6 +110,10 @@ export function ScriptEditor({
 
   const filtered = menu ? variables.filter((v) => v.toLowerCase().includes(menu.query)).slice(0, 10) : []
 
+  // When the interpreter picker is present, the interpreter drives the
+  // placeholder (RouterOS shows MikroTik examples); otherwise honour the prop.
+  const effectivePlaceholder = onInterpreterChange ? PLACEHOLDERS[interpreter] : placeholder
+
   return (
     <div className={`se ${className ?? ''}`}>
       {onInterpreterChange && (
@@ -158,7 +173,7 @@ export function ScriptEditor({
         ref={ref}
         className="se__ta"
         value={value}
-        placeholder={placeholder}
+        placeholder={effectivePlaceholder}
         spellCheck={false}
         onChange={(e) => {
           onChange(e.target.value)

@@ -41,7 +41,16 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 0.4rem;
+  /* Pin the title + close button to the top while the body scrolls. The
+     negative margins + matching padding let the bar bleed over the modal's
+     own padding so nothing shows above or beside it as content scrolls under. */
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--bg);
+  margin: -1.1rem -1.35rem 0.4rem;
+  padding: 0.9rem 1.35rem 0.55rem;
+  border-bottom: 1px solid var(--border);
 }
 .settings__head h3 {
   margin: 0;

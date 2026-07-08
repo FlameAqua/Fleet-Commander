@@ -1,13 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { apiGet, authCheck, getConfig, type AuthResult } from './api'
-import { csvVariableNames } from './lib/csv'
+import { buildCanonicalKeepass, csvVariableNames } from './lib/csv'
 import { SourcePanel } from './features/source/SourcePanel'
 import { emptySource, type SourceMode, type SourceState } from './features/source/sourceModel'
 import { ActionPanel } from './features/run/ActionPanel'
 import { ResultsPanel } from './features/run/ResultsPanel'
 import { useDeployRun } from './features/run/useDeployRun'
 import { buildDeployForm, type ActionId, type DeployConfigForm, type RunMode } from './features/run/deployForm'
-import { selectedHosts, restrictToHost, restrictToHosts, chunk } from './features/run/hosts'
+import { selectedHosts, restrictToHost, restrictToHosts, deselectHosts, chunk } from './features/run/hosts'
 import { assessRisk, type RiskAssessment } from './features/run/riskAssessment'
 import {
   CustomScriptPanel,
@@ -41,7 +41,13 @@ import './App.css'
 type Theme = 'night' | 'day'
 
 type Health = 'checking' | 'ok' | 'down'
-type Step = 'source' | 'action'
+type Step = 'source' | 'action' | 'results'
+
+const STAGES: { id: Step; label: string }[] = [
+  { id: 'source', label: 'Choose your Fleet' },
+  { id: 'action', label: 'Choose Action' },
+  { id: 'results', label: 'Voyage Results' },
+]
 
 const INITIAL_CONFIG: DeployConfigForm = {
   version: 'latest',
@@ -96,9 +102,9 @@ function App() {
   const [shipFreq, setShipFreq] = useState<number>(() => {
     try {
       const v = parseInt(localStorage.getItem('fc.shipFreq') || '', 10)
-      return Number.isFinite(v) ? Math.min(10, Math.max(1, v)) : 4
+      return Number.isFinite(v) ? Math.min(10, Math.max(1, v)) : 5
     } catch {
-      return 4
+      return 5
     }
   })
   const [testHost, setTestHost] = useState<string | null>(null)
@@ -192,6 +198,22 @@ function App() {
     [source],
   )
 
+  // Map each host's canonical label → its title/account, to show in results.
+  const resultTitles = useMemo<Record<string, string>>(() => {
+    if (source.mode !== 'compound' || !source.file) return {}
+    try {
+      const { entries } = buildCanonicalKeepass(source.file.text, {
+        overrides: source.overrides,
+        useLogin: source.useLogin,
+      })
+      const m: Record<string, string> = {}
+      for (const e of entries) if (e.name && e.name !== e.label) m[e.label] = e.name
+      return m
+    } catch {
+      return {}
+    }
+  }, [source])
+
   const isTest = source.mode === 'test'
   const hostCount = isTest ? 1 : selectedHosts(source).length
   const canProceed = isTest || hostCount > 0
@@ -216,10 +238,37 @@ function App() {
     setStep('action')
   }
 
+  // Which roadmap stages are reachable right now (for the top stepper).
+  function stageReachable(id: Step): boolean {
+    if (id === 'source') return true
+    if (id === 'action') return canProceed
+    return run.status !== 'idle' || run.cards.length > 0
+  }
+
+  function goToStage(target: Step) {
+    if (target === step || !stageReachable(target)) return
+    // Going to actions may need the Test-host password first.
+    if (target === 'action') {
+      void continueToActions()
+      return
+    }
+    setStep(target)
+  }
+
   // --- Test Connection: connect-only SSH auth check (re-promptable) -------- #
   const [authChecking, setAuthChecking] = useState(false)
   const [authResults, setAuthResults] = useState<{ results: AuthResult[]; passed: number; total: number } | null>(null)
   const [authError, setAuthError] = useState<string | null>(null)
+  const [authFilter, setAuthFilter] = useState<'all' | 'passed' | 'failed'>('all')
+  const authAbort = useRef<AbortController | null>(null)
+
+  // Close the Test-Connection modal and abort any in-flight stream.
+  function closeAuth() {
+    authAbort.current?.abort()
+    authAbort.current = null
+    setAuthResults(null)
+    setAuthError(null)
+  }
 
   async function onTestConnection() {
     setAuthError(null)
@@ -244,7 +293,13 @@ function App() {
       return
     }
     setAuthChecking(true)
-    setAuthResults(null)
+    setAuthFilter('all')
+    // Open the modal immediately with an empty list; it fills in live as each
+    // host's result streams back from the backend.
+    setAuthResults({ results: [], passed: 0, total: 0 })
+    authAbort.current?.abort()
+    const ac = new AbortController()
+    authAbort.current = ac
     try {
       const form = buildDeployForm({
         action: 'quick_diag', // ignored by /api/auth-check; just needs the source
@@ -253,9 +308,29 @@ function App() {
         source,
         testPassword: testPw,
       })
-      setAuthResults(await authCheck(form))
+      // Null-guarded updaters: if the operator closes the modal mid-stream
+      // (authResults → null), late events are ignored instead of re-opening it.
+      await authCheck(form, {
+        signal: ac.signal,
+        onMeta: (total) => setAuthResults((r) => (r ? { ...r, total } : r)),
+        onResult: (res) =>
+          setAuthResults((r) => {
+            if (!r) return r
+            const results = [...r.results, res]
+            return { results, passed: results.filter((x) => x.ok).length, total: r.total }
+          }),
+        onDone: (passed, total) => setAuthResults((r) => (r ? { ...r, passed, total } : r)),
+        onFatal: (message) => {
+          setAuthResults(null)
+          setAuthError(message)
+        },
+      })
     } catch (e) {
-      setAuthError(e instanceof Error ? e.message : String(e))
+      // Aborting (operator closed the modal) is not an error.
+      if (!(e instanceof DOMException && e.name === 'AbortError')) {
+        setAuthError(e instanceof Error ? e.message : String(e))
+        setAuthResults(null)
+      }
     } finally {
       setAuthChecking(false)
     }
@@ -379,6 +454,7 @@ function App() {
         lastRunRef.current = { src, pw: testPw, op: act === 'threecx' ? op : undefined, act, tcxConfig: tcxConfigOverride }
       }
       void run.start(form, { append })
+      setStep('results') // jump to the Voyage Results stage on run
     } catch (e) {
       setRunError(e instanceof Error ? e.message : String(e))
     }
@@ -397,12 +473,16 @@ function App() {
     const act = actionOverride ?? action
     if (actionOverride && actionOverride !== action) setAction(actionOverride)
     const assessment = assessRisk(act, threecx, customScript)
-    if (assessment.level === 'read-only') {
+    const canBatch = !isTest && hostCount > 1
+    // Read-only actions on a single host (or a Test run) run straight away.
+    // With multiple hosts we still show the modal so the operator can choose
+    // to batch the rollout, even for read-only actions.
+    if (assessment.level === 'read-only' && !canBatch) {
       void execute(0, actionOverride)
       return
     }
     setBatchOn(false)
-    setApproval({ assessment, systems: isTest ? 1 : hostCount, canBatch: !isTest && hostCount > 1, act: actionOverride })
+    setApproval({ assessment, systems: isTest ? 1 : hostCount, canBatch, act: actionOverride })
   }
 
   // Execute the current action: all selected hosts at once, or in batches of N.
@@ -468,10 +548,13 @@ function App() {
     }
     const hosts = selectedHosts(source)
     if (hosts.length > 1) {
-      const ok = window.confirm(
-        `“${act.label}” will be applied to ${hosts.length} systems. Extensions are often custom per-system — apply to all of them?`,
-      )
-      if (!ok) return
+      const ok = await prompt({
+        title: act.label,
+        message: `“${act.label}” will be applied to ${hosts.length} systems. Extensions are often custom per-system — apply to all of them?`,
+        confirm: true,
+        confirmLabel: 'Apply to all',
+      })
+      if (ok === null) return
     }
     startRun('universal', undefined, undefined, undefined, undefined, cfg)
   }
@@ -553,11 +636,29 @@ function App() {
       </header>
 
       <main className="app__main">
-        {step === 'source' ? (
+        <nav className="roadmap" aria-label="Progress">
+          {STAGES.map((s, i) => {
+            const reachable = step === s.id || stageReachable(s.id)
+            return (
+              <Fragment key={s.id}>
+                {i > 0 && <span className="roadmap__arrow" aria-hidden="true">→</span>}
+                <button
+                  type="button"
+                  className={`roadmap__stage${step === s.id ? ' is-active' : ''}${reachable ? '' : ' is-locked'}`}
+                  aria-current={step === s.id ? 'step' : undefined}
+                  disabled={!reachable}
+                  onClick={() => goToStage(s.id)}
+                >
+                  <span className="roadmap__num">{i + 1}</span>
+                  <span className="roadmap__label">{s.label}</span>
+                </button>
+              </Fragment>
+            )
+          })}
+        </nav>
+
+        {step === 'source' && (
           <section className="step" key="source">
-            <h2 className="step__title">
-              <span className="step__num">1</span> Choose your fleet
-            </h2>
             <SourcePanel source={source} onChange={setSource} onModeChange={onModeChange} testHost={testHost} />
             <div className="step__nav">
               <div className="step__navleft">
@@ -581,19 +682,15 @@ function App() {
               </div>
             </div>
           </section>
-        ) : (
+        )}
+
+        {step === 'action' && (
           <section className="step" key="action">
             <div className="step__crumb">
-              <button type="button" className="step__back" onClick={() => setStep('source')}>
-                ← Change systems
-              </button>
               <span className="step__on">
                 Working on <strong>{systemsLabel}</strong>
               </span>
             </div>
-            <h2 className="step__title">
-              <span className="step__num">2</span> Choose action
-            </h2>
             <ActionPanel
               action={action}
               setAction={setAction}
@@ -602,7 +699,7 @@ function App() {
               runHidden={runHidden}
               onRun={onRun}
               onStop={() => run.cancel()}
-              customScriptSlot={<CustomScriptPanel value={customScript} onChange={setCustomScript} variables={availableVars} />}
+              customScriptSlot={<CustomScriptPanel value={customScript} onChange={setCustomScript} variables={availableVars} csvAvailable={source.mode === 'compound'} />}
               threecxSlot={
                 <ThreecxPanel
                   value={threecx}
@@ -613,11 +710,23 @@ function App() {
               }
             />
             {runError && <div className="app__runerror">✕ {runError}</div>}
+          </section>
+        )}
 
+        {step === 'results' && (
+          <section className="step" key="results">
+            <div className="step__crumb">
+              <span className="step__on">
+                Working on <strong>{systemsLabel}</strong>
+              </span>
+            </div>
+            {runError && <div className="app__runerror">✕ {runError}</div>}
             <ResultsPanel
               run={run}
               onFallback={onFallback}
               onReenterPassword={isTest ? () => void reenterTestPassword() : undefined}
+              onStop={() => run.cancel()}
+              titles={resultTitles}
             />
 
             {batchQueue && run.status === 'done' && batchQueue.idx < batchQueue.batches.length - 1 && (
@@ -652,13 +761,7 @@ function App() {
       <UpdateBanner />
 
       {(authResults || authError) && (
-        <div
-          className="confirm__overlay"
-          onMouseDown={() => {
-            setAuthResults(null)
-            setAuthError(null)
-          }}
-        >
+        <div className="confirm__overlay" onMouseDown={closeAuth}>
           <div className="confirm" onMouseDown={(e) => e.stopPropagation()}>
             <div className="confirm__head">
               <h3>Connection test</h3>
@@ -667,41 +770,85 @@ function App() {
               <p className="app__runerror">✕ {authError}</p>
             ) : authResults ? (
               <>
-                <p className={`confirm__summary ${authResults.passed === authResults.total ? '' : 'authres--warn'}`}>
-                  {authResults.passed} of {authResults.total} system{authResults.total === 1 ? '' : 's'} authenticated.
+                <p className={`confirm__summary ${!authChecking && authResults.passed === authResults.total ? '' : 'authres--warn'}`}>
+                  {authChecking ? (
+                    <>
+                      <span className="results__spin">checking…</span> {authResults.results.length} of{' '}
+                      {authResults.total || '?'} done — {authResults.passed} ok
+                    </>
+                  ) : (
+                    `${authResults.passed} of ${authResults.total} system${authResults.total === 1 ? '' : 's'} authenticated.`
+                  )}
                 </p>
+                {authResults.results.length > 0 && (
+                  <div className="authres__filters" role="group" aria-label="Filter results">
+                    {(['all', 'passed', 'failed'] as const).map((f) => {
+                      const count =
+                        f === 'all'
+                          ? authResults.results.length
+                          : f === 'passed'
+                            ? authResults.passed
+                            : authResults.results.length - authResults.passed
+                      return (
+                        <button
+                          key={f}
+                          type="button"
+                          className={`authres__fbtn${authFilter === f ? ' is-active' : ''}`}
+                          onClick={() => setAuthFilter(f)}
+                        >
+                          {f === 'all' ? 'All' : f === 'passed' ? 'Passed' : 'Failed'} ({count})
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
                 <ul className="authres__list">
-                  {authResults.results.map((r) => (
-                    <li key={r.label} className={r.ok ? 'is-ok' : 'is-fail'}>
-                      <span className="authres__dot">{r.ok ? '✓' : '✕'}</span>
-                      <span className="authres__label">{r.label.replace(/^ssh:\/\//, '')}</span>
-                      {!r.ok && <span className="authres__err">{r.error}</span>}
-                    </li>
-                  ))}
+                  {authResults.results
+                    .filter((r) => authFilter === 'all' || (authFilter === 'passed' ? r.ok : !r.ok))
+                    .map((r) => {
+                      const title = resultTitles[r.label]
+                      return (
+                        <li key={r.label} className={r.ok ? 'is-ok' : 'is-fail'}>
+                          <span className="authres__dot">{r.ok ? '✓' : '✕'}</span>
+                          {title && <span className="authres__title">{title}</span>}
+                          <span className="authres__label">{r.label.replace(/^ssh:\/\//, '')}</span>
+                          {!r.ok && <span className="authres__err">{r.error}</span>}
+                        </li>
+                      )
+                    })}
+                  {authChecking && <li className="authres__pending">Checking remaining systems…</li>}
                 </ul>
               </>
             ) : null}
             <div className="confirm__actions">
-              <button
-                type="button"
-                className="run__btn"
-                onClick={() => {
-                  setAuthResults(null)
-                  setAuthError(null)
-                }}
-              >
+              {!isTest && !authChecking && authResults && authResults.results.some((r) => !r.ok) && (
+                <button
+                  type="button"
+                  className="run__btn"
+                  style={{ marginRight: 'auto' }}
+                  title="Remove the failed systems from your selection"
+                  onClick={() => {
+                    const failed = authResults.results.filter((r) => !r.ok).map((r) => r.label)
+                    setSource(deselectHosts(source, failed))
+                    closeAuth()
+                  }}
+                >
+                  Deselect {authResults.results.filter((r) => !r.ok).length} failed
+                </button>
+              )}
+              <button type="button" className="run__btn" onClick={closeAuth}>
                 Close
               </button>
               <button
                 type="button"
                 className="run__btn run__btn--primary"
+                disabled={authChecking}
                 onClick={() => {
-                  setAuthResults(null)
-                  setAuthError(null)
+                  closeAuth()
                   void onTestConnection()
                 }}
               >
-                Test again
+                {authChecking ? 'Testing…' : 'Test again'}
               </button>
             </div>
           </div>
@@ -729,19 +876,22 @@ function App() {
               This will run on <strong>{approval.systems}</strong> system{approval.systems === 1 ? '' : 's'}.
             </p>
             {approval.canBatch && (
-              <label className="confirm__batch">
-                <input type="checkbox" checked={batchOn} onChange={(e) => setBatchOn(e.target.checked)} />
-                <span>Roll out in batches of</span>
+              <div className="confirm__batch">
+                {/* Only the checkbox + its own text is a <label> — so clicking
+                    or typing in the size field never toggles batching. */}
+                <label className="confirm__batch-toggle">
+                  <input type="checkbox" checked={batchOn} onChange={(e) => setBatchOn(e.target.checked)} />
+                  <span>Roll out in batches of</span>
+                </label>
                 <input
                   type="number"
                   min={1}
                   className="confirm__batchsize"
                   value={batchSize}
                   onChange={(e) => setBatchSize(Math.max(1, Number(e.target.value) || 1))}
-                  disabled={!batchOn}
                 />
                 <span>systems, pausing to review between each.</span>
-              </label>
+              </div>
             )}
             <div className="confirm__actions">
               <button type="button" className="run__btn" onClick={() => setApproval(null)}>

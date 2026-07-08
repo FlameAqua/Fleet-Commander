@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { usePrompt } from '../../components/PromptProvider'
+import { useToast } from '../../components/ToastProvider'
 import {
   ApiError,
   decryptCsv,
   decryptServerCsv,
+  deleteCsvFile,
   encryptCsvToFolder,
   getServerCsv,
   listCsvFiles,
@@ -78,12 +80,11 @@ function CompoundEditor({
   source: CompoundSource
   onChange: (s: SourceState) => void
 }) {
-  const [notice, setNotice] = useState<{ text: string; kind: NoticeKind } | null>(null)
-  const [showMapping, setShowMapping] = useState(false)
   const [serverFiles, setServerFiles] = useState<CsvFileInfo[]>([])
   const prompt = usePrompt()
+  const toast = useToast()
 
-  const notify: Notify = (text, kind = 'error') => setNotice(text ? { text, kind } : null)
+  const notify: Notify = (text, kind = 'error') => toast(text, kind)
 
   const refreshServerFiles = useCallback(async () => {
     try {
@@ -114,7 +115,26 @@ function CompoundEditor({
     try {
       const { filename } = await encryptCsvToFolder(file, pw)
       await refreshServerFiles()
-      notify(`Saved encrypted copy "${filename}" to your CSV folder.`, 'ok')
+      // Encryption succeeded — delete the plaintext original from disk so the
+      // cleartext copy doesn't linger. The loaded CSV stays in memory (we don't
+      // touch source.file), so the operator keeps working without re-entering
+      // the password. Only possible in the desktop build, where we can resolve
+      // the picked file's real path.
+      const diskPath = window.electron?.filePath?.(file)
+      let deleted = false
+      if (diskPath && /\.csv$/i.test(diskPath)) {
+        try {
+          await deleteCsvFile(diskPath)
+          deleted = true
+        } catch {
+          // Non-fatal — the encrypted copy is saved regardless.
+        }
+      }
+      notify(
+        `Saved encrypted copy "${filename}" to your CSV folder.` +
+          (deleted ? ' Removed the plaintext original.' : ''),
+        'ok',
+      )
     } catch (e) {
       notify(errMsg(e))
     }
@@ -254,54 +274,8 @@ function CompoundEditor({
             ✕
           </button>
         )}
-        <CsvToolsMenu onNotice={notify} onChanged={refreshServerFiles} />
+        <CsvToolsMenu source={source} onChange={onChange} onChanged={refreshServerFiles} />
       </div>
-
-      <button type="button" className="src-link" onClick={() => setShowMapping((v) => !v)}>
-        {showMapping ? '▾' : '▸'} Column mapping & options
-      </button>
-      {showMapping && (
-        <div className="src-mapping">
-          <ColInput
-            label="URL column"
-            value={source.overrides.website ?? ''}
-            onChange={(v) => onChange({ ...source, overrides: { ...source.overrides, website: v } })}
-            placeholder="Web Site"
-          />
-          <ColInput
-            label="Password column"
-            value={source.overrides.password ?? ''}
-            onChange={(v) => onChange({ ...source, overrides: { ...source.overrides, password: v } })}
-            placeholder="Password"
-          />
-          <ColInput
-            label="Login Name column"
-            value={source.overrides.loginName ?? ''}
-            onChange={(v) =>
-              onChange({ ...source, overrides: { ...source.overrides, loginName: v } })
-            }
-            placeholder="Login Name"
-          />
-          <ColInput
-            label="Account column"
-            value={source.overrides.account ?? ''}
-            onChange={(v) => onChange({ ...source, overrides: { ...source.overrides, account: v } })}
-            placeholder="Account"
-          />
-          <label className="src-check">
-            <input
-              type="checkbox"
-              checked={source.useLogin}
-              onChange={(e) => onChange({ ...source, useLogin: e.target.checked })}
-            />
-            Use Login Name column as the SSH user (overrides user@ in the URL)
-          </label>
-        </div>
-      )}
-
-      {notice && (
-        <div className={`src-notice src-notice--${notice.kind}`}>{notice.text}</div>
-      )}
 
       {preview && !preview.ok && <div className="src-notice src-notice--error">{preview.error}</div>}
       {preview && preview.ok && (
@@ -345,11 +319,22 @@ function ColInput({
 // --------------------------------------------------------------------------
 // CSV tools cog — encrypt / decrypt / open the CSV library folder
 // --------------------------------------------------------------------------
-function CsvToolsMenu({ onNotice, onChanged }: { onNotice: Notify; onChanged: () => Promise<void> }) {
+function CsvToolsMenu({
+  source,
+  onChange,
+  onChanged,
+}: {
+  source: CompoundSource
+  onChange: (s: SourceState) => void
+  onChanged: () => Promise<void>
+}) {
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [showMapping, setShowMapping] = useState(false)
   const [pos, setPos] = useState<{ top: number; right: number } | null>(null)
   const prompt = usePrompt()
+  const toast = useToast()
+  const onNotice: Notify = (text, kind = 'error') => toast(text, kind)
   const cog = useRef<HTMLButtonElement>(null)
   const encInput = useRef<HTMLInputElement>(null)
   const decInput = useRef<HTMLInputElement>(null)
@@ -454,6 +439,9 @@ function CsvToolsMenu({ onNotice, onChanged }: { onNotice: Notify; onChanged: ()
           <>
             <div className="src-tools__backdrop" onClick={() => setOpen(false)} />
             <div className="src-tools__menu" role="menu" style={{ top: pos.top, right: pos.right }}>
+              <button type="button" role="menuitem" onClick={() => { setOpen(false); setShowMapping(true) }}>
+                Column mapping & options…
+              </button>
               <button type="button" role="menuitem" onClick={() => { setOpen(false); encInput.current?.click() }}>
                 Encrypt a CSV…
               </button>
@@ -489,7 +477,78 @@ function CsvToolsMenu({ onNotice, onChanged }: { onNotice: Notify; onChanged: ()
           if (f) void decryptPick(f)
         }}
       />
+      {showMapping && (
+        <ColumnMappingModal source={source} onChange={onChange} onClose={() => setShowMapping(false)} />
+      )}
     </span>
+  )
+}
+
+// --------------------------------------------------------------------------
+// Column mapping & options — modal launched from the CSV-tools cog
+// --------------------------------------------------------------------------
+function ColumnMappingModal({
+  source,
+  onChange,
+  onClose,
+}: {
+  source: CompoundSource
+  onChange: (s: SourceState) => void
+  onClose: () => void
+}) {
+  const setOverride = (key: keyof CompoundSource['overrides'], v: string) =>
+    onChange({ ...source, overrides: { ...source.overrides, [key]: v } })
+
+  return createPortal(
+    <div className="prompt__overlay" onMouseDown={onClose}>
+      <div className="prompt__box src-mapmodal" onMouseDown={(e) => e.stopPropagation()}>
+        <h3 className="prompt__title">Column mapping & options</h3>
+        <p className="prompt__msg">
+          Map your CSV's column headers to each field. Leave a box empty to use its default (shown as
+          placeholder — KeePass export names).
+        </p>
+        <div className="src-mapping">
+          <ColInput
+            label="URL column"
+            value={source.overrides.website ?? ''}
+            onChange={(v) => setOverride('website', v)}
+            placeholder="Web Site"
+          />
+          <ColInput
+            label="Password column"
+            value={source.overrides.password ?? ''}
+            onChange={(v) => setOverride('password', v)}
+            placeholder="Password"
+          />
+          <ColInput
+            label="Login Name column"
+            value={source.overrides.loginName ?? ''}
+            onChange={(v) => setOverride('loginName', v)}
+            placeholder="Login Name"
+          />
+          <ColInput
+            label="Title column"
+            value={source.overrides.account ?? ''}
+            onChange={(v) => setOverride('account', v)}
+            placeholder="Account"
+          />
+        </div>
+        <label className="src-check">
+          <input
+            type="checkbox"
+            checked={source.useLogin}
+            onChange={(e) => onChange({ ...source, useLogin: e.target.checked })}
+          />
+          Use Login Name column as the SSH user (overrides user@ in the URL)
+        </label>
+        <div className="prompt__actions">
+          <button type="button" className="prompt__btn prompt__btn--primary" onClick={onClose}>
+            Done
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
   )
 }
 

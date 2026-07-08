@@ -57,9 +57,20 @@ function dirQuery(dir: string): string {
   return d ? `?dir=${encodeURIComponent(d)}` : ''
 }
 
+/** Build a `?dir=&category=` query string, omitting empty parts. */
+function scriptQuery(dir: string, category = ''): string {
+  const params = new URLSearchParams()
+  if (dir.trim()) params.set('dir', dir.trim())
+  if (category) params.set('category', category)
+  const s = params.toString()
+  return s ? `?${s}` : ''
+}
+
 // --- Backend response shapes (grown per-slice as features are migrated) ---
 export interface ScriptInfo {
   name: string
+  /** Subdirectory category; '' = the default (root) category. */
+  category: string
   size: number
   modified: number
 }
@@ -68,11 +79,14 @@ export interface ScriptsResponse {
   ok: boolean
   dir: string
   scripts: ScriptInfo[]
+  /** Names of the category subdirectories that exist. */
+  categories: string[]
 }
 
 export interface ScriptContent {
   ok: boolean
   name: string
+  category: string
   content: string
 }
 
@@ -81,28 +95,66 @@ export function listScripts(dir = ''): Promise<ScriptsResponse> {
   return apiGet<ScriptsResponse>(`/api/scripts${dirQuery(dir)}`)
 }
 
-export function getScript(name: string, dir = ''): Promise<ScriptContent> {
-  return apiGet<ScriptContent>(`/api/scripts/${encodeURIComponent(name)}${dirQuery(dir)}`)
+export function getScript(name: string, dir = '', category = ''): Promise<ScriptContent> {
+  return apiGet<ScriptContent>(`/api/scripts/${encodeURIComponent(name)}${scriptQuery(dir, category)}`)
 }
 
 export async function saveScript(
   name: string,
   content: string,
   dir = '',
+  category = '',
 ): Promise<ScriptInfo> {
   const fd = new FormData()
   fd.append('name', name)
   fd.append('content', content)
   if (dir.trim()) fd.append('dir', dir.trim())
+  if (category) fd.append('category', category)
   return parseJson<ScriptInfo>(await fetch(apiUrl('/api/scripts'), { method: 'POST', body: fd }))
 }
 
-export async function deleteScript(name: string, dir = ''): Promise<void> {
+export async function deleteScript(name: string, dir = '', category = ''): Promise<void> {
   await parseJson<{ ok: true }>(
-    await fetch(apiUrl(`/api/scripts/${encodeURIComponent(name)}${dirQuery(dir)}`), {
+    await fetch(apiUrl(`/api/scripts/${encodeURIComponent(name)}${scriptQuery(dir, category)}`), {
       method: 'DELETE',
     }),
   )
+}
+
+/** Create a new category (subdirectory) in the scripts folder. */
+export async function createScriptCategory(name: string, dir = ''): Promise<string> {
+  const fd = new FormData()
+  fd.append('name', name)
+  if (dir.trim()) fd.append('dir', dir.trim())
+  const r = await parseJson<{ ok: true; category: string }>(
+    await fetch(apiUrl('/api/scripts/category'), { method: 'POST', body: fd }),
+  )
+  return r.category
+}
+
+/** Delete a category; its scripts fall back to General. Returns how many moved. */
+export async function deleteScriptCategory(name: string, dir = ''): Promise<number> {
+  const params = new URLSearchParams({ name })
+  if (dir.trim()) params.set('dir', dir.trim())
+  const r = await parseJson<{ ok: true; moved: number }>(
+    await fetch(apiUrl(`/api/scripts/category?${params.toString()}`), { method: 'DELETE' }),
+  )
+  return r.moved
+}
+
+/** Move a script between categories. Empty strings mean the default category. */
+export async function moveScript(
+  name: string,
+  fromCategory: string,
+  toCategory: string,
+  dir = '',
+): Promise<void> {
+  const fd = new FormData()
+  fd.append('name', name)
+  fd.append('from_category', fromCategory)
+  fd.append('to_category', toCategory)
+  if (dir.trim()) fd.append('dir', dir.trim())
+  await parseJson<{ ok: true }>(await fetch(apiUrl('/api/scripts/move'), { method: 'POST', body: fd }))
 }
 
 /** Opens the OS folder picker server-side. Returns the chosen path, or null if cancelled. */
@@ -190,6 +242,20 @@ export async function encryptCsvToFolder(
   fd.append('save', 'true')
   return parseJson<{ ok: true; filename: string; dir: string }>(
     await fetch(apiUrl('/api/encrypt-csv'), { method: 'POST', body: fd }),
+  )
+}
+
+/**
+ * Delete a plaintext CSV from disk by absolute path. Backend refuses anything
+ * that isn't an existing .csv file. Used after encrypt-on-import.
+ */
+export async function deleteCsvFile(path: string): Promise<void> {
+  await parseJson<{ ok: true }>(
+    await fetch(apiUrl('/api/delete-csv-file'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path }),
+    }),
   )
 }
 
@@ -286,11 +352,71 @@ export interface AuthResult {
   error: string
 }
 
-/** Connect-only SSH auth test. Takes the same multipart form as a deploy. */
-export async function authCheck(
-  form: FormData,
-): Promise<{ results: AuthResult[]; passed: number; total: number }> {
-  return parseJson<{ ok: true; results: AuthResult[]; passed: number; total: number }>(
-    await fetch(apiUrl('/api/auth-check'), { method: 'POST', body: form }),
-  )
+export interface AuthCheckHandlers {
+  /** Total number of systems being checked (arrives first). */
+  onMeta?: (total: number) => void
+  /** One host finished — pass or fail. Called as each result streams in. */
+  onResult?: (r: AuthResult) => void
+  /** All hosts done. */
+  onDone?: (passed: number, total: number) => void
+  /** Pre-run failure (bad CSV, no systems, etc.). */
+  onFatal?: (message: string) => void
+  signal?: AbortSignal
+}
+
+/**
+ * Connect-only SSH auth test. Takes the same multipart form as a deploy and
+ * streams per-host results (NDJSON) so the caller can update a modal live.
+ */
+export async function authCheck(form: FormData, h: AuthCheckHandlers): Promise<void> {
+  const res = await fetch(apiUrl('/api/auth-check'), { method: 'POST', body: form, signal: h.signal })
+  if (!res.ok || !res.body) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `auth-check failed: ${res.status} ${res.statusText}`)
+  }
+  // Back-compat: an older backend (before streaming) returns a single JSON
+  // blob instead of NDJSON. Adapt it to the same callbacks so the modal fills
+  // in one shot rather than showing "0 of 0".
+  if (!(res.headers.get('Content-Type') || '').includes('ndjson')) {
+    const data = (await res.json().catch(() => null)) as
+      | { results?: AuthResult[]; passed?: number; total?: number; error?: string }
+      | null
+    if (data && Array.isArray(data.results)) {
+      h.onMeta?.(data.total ?? data.results.length)
+      for (const r of data.results) h.onResult?.(r)
+      h.onDone?.(data.passed ?? data.results.filter((r) => r.ok).length, data.total ?? data.results.length)
+      return
+    }
+    throw new Error(data?.error || 'auth-check failed')
+  }
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buf = ''
+  const flush = (line: string) => {
+    const s = line.trim()
+    if (!s) return
+    let ev: Record<string, unknown>
+    try {
+      ev = JSON.parse(s)
+    } catch {
+      return
+    }
+    if (ev.type === 'meta') h.onMeta?.(ev.total as number)
+    else if (ev.type === 'result')
+      h.onResult?.({ label: ev.label as string, ok: ev.ok as boolean, error: (ev.error as string) ?? '' })
+    else if (ev.type === 'done') h.onDone?.(ev.passed as number, ev.total as number)
+    else if (ev.type === 'fatal') h.onFatal?.(ev.message as string)
+  }
+  for (;;) {
+    const { value, done } = await reader.read()
+    if (done) break
+    buf += decoder.decode(value, { stream: true })
+    let nl: number
+    while ((nl = buf.indexOf('\n')) !== -1) {
+      flush(buf.slice(0, nl))
+      buf = buf.slice(nl + 1)
+    }
+  }
+  buf += decoder.decode()
+  if (buf) flush(buf)
 }

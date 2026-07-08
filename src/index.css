@@ -46,6 +46,24 @@
   box-sizing: border-box;
 }
 
+/* Baseline: every enabled button (and its text/inline children, since `cursor`
+   inherits) shows the clickable pointer across its whole surface. Individual
+   components may still override, but this stops any button whose own rule omits
+   `cursor` from falling back to the default arrow over its label. */
+button:enabled {
+  cursor: pointer;
+}
+button:disabled {
+  cursor: default;
+}
+
+html {
+  /* Always reserve the scrollbar gutter so switching between a short stage
+     (no scrollbar) and a tall one (scrollbar) doesn't shift the centred
+     content sideways. */
+  scrollbar-gutter: stable;
+}
+
 body {
   margin: 0;
   color: var(--text);

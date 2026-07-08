@@ -189,6 +189,14 @@
   background: rgba(142, 162, 255, 0.16);
 }
 
+.src-mapmodal {
+  width: min(560px, 94vw);
+}
+.src-mapmodal .src-mapping {
+  border: none;
+  padding: 0;
+  background: none;
+}
 .src-mapping {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));

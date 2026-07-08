@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require('electron')
+const { contextBridge, ipcRenderer, webUtils } = require('electron')
 
 // Minimal, safe bridge. The renderer talks to the Flask backend over HTTP
 // (same-origin via the Vite proxy / Flask static mount), so most app logic
@@ -22,6 +22,15 @@ contextBridge.exposeInMainWorld('electron', {
   openExternal: (url) => ipcRenderer.send('fc:open-external', url),
   // Open a local folder in the OS file manager (foregrounded).
   openPath: (path) => ipcRenderer.invoke('fc:open-path', path),
+  // Resolve the absolute disk path of a picked File (Electron replacement for
+  // the removed File.path). Returns '' if unavailable (e.g. web build).
+  filePath: (file) => {
+    try {
+      return webUtils.getPathForFile(file)
+    } catch {
+      return ''
+    }
+  },
   appVersion,
   // Auto-update bridge. onUpdateStatus returns an unsubscribe function.
   onUpdateStatus: (cb) => {

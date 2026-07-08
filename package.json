@@ -1,7 +1,7 @@
 {
   "name": "fleet-commander",
   "private": true,
-  "version": "1.0.0-beta.2",
+  "version": "1.0.0-beta.7",
   "description": "Fleet Commander",
   "author": "OneContact",
   "type": "module",
@@ -17,6 +17,7 @@
     "package": "npm run build && npm run build:backend && electron-builder",
     "package:dir": "npm run build && npm run build:backend && electron-builder --dir",
     "lint": "eslint .",
+    "test": "node tools/run-tests.mjs",
     "preview": "vite preview",
     "start": "npm run build && electron .",
     "format": "prettier --write ./src"
