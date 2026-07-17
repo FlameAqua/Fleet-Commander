@@ -7,8 +7,17 @@
 ; if it didn't, delete the one electron-builder just recreated.
 ;
 ; First installs are untouched — the desktop shortcut is created as normal.
+;
+; The !ifndef matters: electron-builder includes this file in BOTH the installer
+; and the uninstaller compile (both get the same shared header), but only the
+; installer ever inserts customInit/customInstall. Declared unconditionally, the
+; variable is unused in the uninstaller pass, and makensis reports that as
+; "warning 6001: ... not referenced or never set" — which electron-builder runs
+; with warnings-as-errors, failing the build at the packaging step.
 
-Var DesktopShortcutExisted
+!ifndef BUILD_UNINSTALLER
+  Var DesktopShortcutExisted
+!endif
 
 ; Runs early, before the install section recreates shortcuts.
 !macro customInit
