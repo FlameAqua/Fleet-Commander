@@ -36,6 +36,14 @@
   flex-direction: column;
   gap: 0.85rem;
 }
+/* .seg is inline-grid, so it hugs its labels — but these are column flex
+   containers, whose default align-items:stretch pulls it to the full card
+   width. The 3CX selector only looks compact because .tcx__top is a flex ROW
+   (there, stretch applies vertically). Keep all three selectors identical. */
+.run__body > .seg,
+.cs > .seg {
+  align-self: flex-start;
+}
 .run__subtabs {
   display: inline-flex;
   align-self: flex-start;

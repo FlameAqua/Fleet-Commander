@@ -23,7 +23,8 @@ const TABS: TabDef[] = [
   {
     id: 'custom',
     label: 'Custom Script',
-    actions: [{ id: 'custom_script', label: 'Custom Script', blurb: 'Run any script on the selected systems.' }],
+    // No blurb: the panel's own Write / Library / Import tabs sit at the top.
+    actions: [{ id: 'custom_script', label: 'Custom Script' }],
   },
   {
     id: 'threecx',
@@ -35,6 +36,9 @@ const TABS: TabDef[] = [
   {
     id: 'maintenance',
     label: 'Maintenance',
+    // Blurbs kept here (unlike the 3CX / Custom Script tabs, whose sub-tabs say
+    // what they do): these are per-action, and they're the only place the UI
+    // states these are safe to run against a live PBX.
     actions: [
       { id: 'apt_upgrade', label: 'Apt Upgrade', blurb: 'Patch Debian/OpenBSD without rebooting or restarting services.' },
       { id: 'quick_diag', label: 'Quick Diagnostic', blurb: 'Read-only health snapshot (uptime, load, mem, disk). Changes nothing.' },
