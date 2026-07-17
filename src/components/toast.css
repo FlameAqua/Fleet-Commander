@@ -39,6 +39,10 @@
 .toast--info {
   border-left-color: var(--accent);
 }
+.toast--tip {
+  border-left-color: #38bdf8;
+  background: color-mix(in srgb, #38bdf8 12%, var(--bg));
+}
 
 .toast__icon {
   flex: none;
@@ -53,6 +57,20 @@
 }
 .toast--info .toast__icon {
   color: var(--accent);
+}
+.toast--tip .toast__icon {
+  color: #38bdf8;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.15rem;
+  height: 1.15rem;
+  border: 1.5px solid #38bdf8;
+  border-radius: 50%;
+  font-size: 0.8rem;
+}
+.toast__tiplabel {
+  color: #38bdf8;
 }
 
 .toast__text {

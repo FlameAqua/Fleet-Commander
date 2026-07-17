@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Segmented } from '../../components/Segmented'
+import { useTip } from '../../components/ToastProvider'
 import { readFileText } from '../../lib/file'
 import { catalogFor, TCX_ENDPOINTS, type CatalogField } from './catalogs'
 import {
@@ -29,8 +30,12 @@ interface Props {
   onQuickAction: (action: QuickAction, sourceExt: string, targets: string) => void
 }
 
+const COMMON_FIELDS_TIP =
+  'Loaded common fields that generally automate the tedious parts of new 3CX phone system creation.'
+
 export function ThreecxPanel({ value, onChange, onProbe, onQuickAction }: Props) {
   const set = (patch: Partial<ThreecxState>) => onChange({ ...value, ...patch })
+  const tip = useTip()
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [importError, setImportError] = useState<string | null>(null)
 
@@ -129,6 +134,16 @@ export function ThreecxPanel({ value, onChange, onProbe, onQuickAction }: Props)
       {/* Audit / Modify — search attributes (single fields) or add a whole entity. */}
       {isFieldOp && (
         <>
+          <p className="tcx__desc">
+            {value.operation === 'audit' ? (
+              'Select an attribute and the expected value. All selected 3CX systems will verify if this field matches.'
+            ) : (
+              <>
+                Select an attribute and the desired value. All selected 3CX systems will <strong>apply/override</strong> this new
+                value.
+              </>
+            )}
+          </p>
           <div className="tcx__addrow">
             <AttributeSearch onPick={(attr) => onChange(addAttribute(value, attr))} />
             <select
@@ -166,6 +181,10 @@ export function ThreecxPanel({ value, onChange, onProbe, onQuickAction }: Props)
       {/* Export — pick whole entities (+ Default Fields preset). */}
       {isExportOp && (
         <>
+          <p className="tcx__desc">
+            Select the 3CX entities (e.g. Users, Trunks, etc.) that you want to export as JSON. This can later be
+            imported to another system(s).
+          </p>
           <div className="tcx__add">
             <select
               value=""
@@ -190,8 +209,15 @@ export function ThreecxPanel({ value, onChange, onProbe, onQuickAction }: Props)
                 ))}
               </optgroup>
             </select>
-            <button type="button" className="tcx__link" onClick={() => set({ panels: goldenPanels() })}>
-              ★ Load Default Fields
+            <button
+              type="button"
+              className="tcx__link"
+              onClick={() => {
+                set({ panels: goldenPanels() })
+                tip('tcx-common-fields', COMMON_FIELDS_TIP)
+              }}
+            >
+              ★ Load Common Fields
             </button>
             {value.panels.length > 0 && (
               <button type="button" className="tcx__link" onClick={() => set({ panels: [] })}>
@@ -274,6 +300,9 @@ function ProbeHint({ onProbe }: { onProbe: () => void }) {
 function AttributeSearch({ onPick }: { onPick: (attr: AttributeRef) => void }) {
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null)
+  const box = useRef<HTMLDivElement>(null)
+  const list = useRef<HTMLUListElement>(null)
 
   const matches = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -283,8 +312,34 @@ function AttributeSearch({ onPick }: { onPick: (attr: AttributeRef) => void }) {
     ).slice(0, 40)
   }, [query])
 
+  // The list is portaled to <body> (see the note on .tcx-search__list), so it
+  // has to be anchored to the input's rect by hand. Layout effect, not effect:
+  // measure before paint or the list flashes at the wrong spot.
+  useLayoutEffect(() => {
+    if (!open) return
+    const r = box.current?.getBoundingClientRect()
+    if (r) setPos({ top: r.bottom + 2, left: r.left, width: r.width })
+  }, [open])
+
+  // Portaled + fixed means the list won't follow the page, so close it on
+  // scroll/resize. Ignore scrolls coming from inside the list itself — it is
+  // scrollable, and a capture-phase listener sees those too.
+  useEffect(() => {
+    if (!open) return
+    const close = (e: Event) => {
+      if (e.type === 'scroll' && e.target instanceof Node && list.current?.contains(e.target)) return
+      setOpen(false)
+    }
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('resize', close)
+    return () => {
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('resize', close)
+    }
+  }, [open])
+
   return (
-    <div className="tcx-search">
+    <div className="tcx-search" ref={box}>
       <input
         type="text"
         className="tcx-search__input"
@@ -298,26 +353,28 @@ function AttributeSearch({ onPick }: { onPick: (attr: AttributeRef) => void }) {
         onBlur={() => setTimeout(() => setOpen(false), 150)}
         spellCheck={false}
       />
-      {open && matches.length > 0 && (
-        <ul className="tcx-search__list">
-          {matches.map((a) => (
-            <li key={`${a.entityKey}.${a.field}`}>
-              <button
-                type="button"
-                onMouseDown={(e) => {
-                  e.preventDefault()
-                  onPick(a)
-                  setQuery('')
-                  setOpen(false)
-                }}
-              >
-                <span className="tcx-search__field">{a.field}</span>
-                <span className="tcx-search__ent">{a.entityLabel}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+      {open && matches.length > 0 && pos &&
+        createPortal(
+          <ul className="tcx-search__list" ref={list} style={{ top: pos.top, left: pos.left, width: pos.width }}>
+            {matches.map((a) => (
+              <li key={`${a.entityKey}.${a.field}`}>
+                <button
+                  type="button"
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    onPick(a)
+                    setQuery('')
+                    setOpen(false)
+                  }}
+                >
+                  <span className="tcx-search__field">{a.field}</span>
+                  <span className="tcx-search__ent">{a.entityLabel}</span>
+                </button>
+              </li>
+            ))}
+          </ul>,
+          document.body,
+        )}
     </div>
   )
 }

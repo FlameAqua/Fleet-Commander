@@ -91,8 +91,7 @@
   margin-right: auto; /* push the filter + New button to the right */
   white-space: nowrap;
 }
-.scripts__filter,
-.scripts__catpick {
+.scripts__filter {
   font: inherit;
   font-size: 0.8rem;
   padding: 0.25rem 0.4rem;
@@ -201,22 +200,52 @@
 }
 .scripts__editor-head {
   display: flex;
+  align-items: center;
   gap: 0.5rem;
 }
-.scripts__editor-head input {
+/* Which script the box holds — the referent for "Overwrite". */
+.scripts__editor-title {
   flex: 1;
-  font: inherit;
-  padding: 0.4rem 0.6rem;
-  border: 1px solid rgba(127, 127, 127, 0.35);
-  border-radius: 6px;
-  background: rgba(127, 127, 127, 0.08);
-  color: inherit;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.scripts__save {
-  min-width: 90px;
+.scripts__editor-new {
+  font-style: normal;
+  font-weight: 500;
+  color: var(--muted, #888);
+}
+.scripts__editor-title .scripts__cat {
+  margin-right: 0;
+  font-style: normal;
+  font-size: 0.72rem;
+}
+.scripts button.scripts__create {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.scripts button.scripts__create:hover:not(:disabled) {
+  filter: brightness(1.1);
 }
 .scripts__hint {
   margin: 0;
   font-size: 0.75rem;
   color: var(--muted, #888);
+}
+/* Category picker inside the Create modal (portaled — no .scripts ancestor). */
+.scripts__modalcat {
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
 }

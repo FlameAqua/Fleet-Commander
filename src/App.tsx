@@ -9,6 +9,7 @@ import { useDeployRun } from './features/run/useDeployRun'
 import { buildDeployForm, type ActionId, type DeployConfigForm, type RunMode } from './features/run/deployForm'
 import { selectedHosts, restrictToHost, restrictToHosts, deselectHosts, chunk } from './features/run/hosts'
 import { assessRisk, type RiskAssessment } from './features/run/riskAssessment'
+import { loadExitCategories, saveExitCategories, type ExitCategory } from './features/run/exitCategories'
 import {
   CustomScriptPanel,
   emptyCustomScript,
@@ -107,6 +108,7 @@ function App() {
       return 5
     }
   })
+  const [exitCategories, setExitCategories] = useState<ExitCategory[]>(() => loadExitCategories())
   const [testHost, setTestHost] = useState<string | null>(null)
   const [step, setStep] = useState<Step>('source')
   // Per-mode source state so switching tabs doesn't wipe your selection.
@@ -157,6 +159,10 @@ function App() {
   }, [shipFreq])
 
   useEffect(() => {
+    saveExitCategories(exitCategories)
+  }, [exitCategories])
+
+  useEffect(() => {
     try {
       localStorage.setItem('fc.fx', JSON.stringify(fx))
     } catch {
@@ -193,8 +199,15 @@ function App() {
   }, [])
 
   // Per-system variables available to custom scripts (Compound CSV column names).
+  // Test/Manual have no CSV, but the backend mirrors each host's SSH password
+  // into $Password for them, so offer that one.
   const availableVars = useMemo(
-    () => (source.mode === 'compound' && source.file ? csvVariableNames(source.file.text) : []),
+    () =>
+      source.mode === 'compound'
+        ? source.file
+          ? csvVariableNames(source.file.text)
+          : []
+        : ['Password'],
     [source],
   )
 
@@ -218,6 +231,12 @@ function App() {
   const hostCount = isTest ? 1 : selectedHosts(source).length
   const canProceed = isTest || hostCount > 0
   const systemsLabel = isTest ? 'the test host' : `${hostCount} system${hostCount === 1 ? '' : 's'}`
+  // Newline-separated list of every selected system, for a native tooltip.
+  const systemsTooltip = (isTest ? [testHost ?? 'test host'] : selectedHosts(source).map((h) => h.label)).join('\n')
+  // Signature of a selection — used to cache/invalidate validation results.
+  const sigForSource = (src: SourceState): string =>
+    src.mode === 'test' ? `test:${testHost ?? ''}` : selectedHosts(src).map((h) => h.value).sort().join('|')
+  const selectionSig = sigForSource(source)
 
   function onModeChange(m: SourceMode) {
     setSourceMode(m)
@@ -234,6 +253,25 @@ function App() {
       })
       if (!pw) return
       setTestPassword(pw)
+    }
+    // Nudge to validate connections first — but only when advancing from the
+    // fleet step. Navigating back to Actions from Results must never re-prompt.
+    if (step === 'source' && !isTest && !hasValidatedCurrent) {
+      const choice = await prompt({
+        title: 'Continue without validating?',
+        message:
+          "You haven't validated the SSH connections for these systems yet. Validate them first, or continue anyway?",
+        options: [
+          { value: 'validate', label: 'Validate connections first' },
+          { value: 'continue', label: 'Continue anyway' },
+        ],
+        confirmLabel: 'OK',
+      })
+      if (choice === null) return
+      if (choice === 'validate') {
+        onValidateClick()
+        return
+      }
     }
     setStep('action')
   }
@@ -270,19 +308,37 @@ function App() {
     setStep(target)
   }
 
-  // --- Test Connection: connect-only SSH auth check (re-promptable) -------- #
+  // --- Validate Connections: connect-only SSH auth check ------------------- #
   const [authChecking, setAuthChecking] = useState(false)
+  const [authOpen, setAuthOpen] = useState(false)
   const [authResults, setAuthResults] = useState<{ results: AuthResult[]; passed: number; total: number } | null>(null)
   const [authError, setAuthError] = useState<string | null>(null)
   const [authFilter, setAuthFilter] = useState<'all' | 'passed' | 'failed'>('all')
+  // Which selection the cached results belong to (so we can reopen vs re-run).
+  const [authSig, setAuthSig] = useState('')
   const authAbort = useRef<AbortController | null>(null)
 
-  // Close the Test-Connection modal and abort any in-flight stream.
+  // True when the current selection already has (finished) validation results.
+  const hasValidatedCurrent =
+    !authChecking && authResults !== null && authResults.results.length > 0 && authSig === selectionSig
+
+  // Close the modal, but KEEP the results cached so re-clicking reopens them.
   function closeAuth() {
     authAbort.current?.abort()
     authAbort.current = null
-    setAuthResults(null)
+    setAuthOpen(false)
     setAuthError(null)
+  }
+
+  // Validate button: reopen cached results if the selection is unchanged,
+  // otherwise run a fresh validation.
+  function onValidateClick() {
+    if (hasValidatedCurrent) {
+      setAuthError(null)
+      setAuthOpen(true)
+      return
+    }
+    void onTestConnection()
   }
 
   async function onTestConnection() {
@@ -309,6 +365,8 @@ function App() {
     }
     setAuthChecking(true)
     setAuthFilter('all')
+    setAuthOpen(true)
+    setAuthSig(selectionSig) // these results correspond to the current selection
     // Open the modal immediately with an empty list; it fills in live as each
     // host's result streams back from the backend.
     setAuthResults({ results: [], passed: 0, total: 0 })
@@ -325,21 +383,29 @@ function App() {
       })
       // Null-guarded updaters: if the operator closes the modal mid-stream
       // (authResults → null), late events are ignored instead of re-opening it.
+      const families = new Set<string>()
       await authCheck(form, {
         signal: ac.signal,
         onMeta: (total) => setAuthResults((r) => (r ? { ...r, total } : r)),
-        onResult: (res) =>
+        onResult: (res) => {
+          if (res.ok && res.os) families.add(res.os)
           setAuthResults((r) => {
             if (!r) return r
             const results = [...r.results, res]
             return { results, passed: results.filter((x) => x.ok).length, total: r.total }
-          }),
+          })
+        },
         onDone: (passed, total) => setAuthResults((r) => (r ? { ...r, passed, total } : r)),
         onFatal: (message) => {
           setAuthResults(null)
           setAuthError(message)
         },
       })
+      // A pure-RouterOS fleet (nothing else detected) → default the Custom
+      // Script interpreter to RouterOS. Mixed fleets are left untouched.
+      if (families.size === 1 && families.has('routeros')) {
+        setCustomScript((cs) => (cs.interpreter === 'routeros' ? cs : { ...cs, interpreter: 'routeros' }))
+      }
     } catch (e) {
       // Aborting (operator closed the modal) is not an error.
       if (!(e instanceof DOMException && e.name === 'AbortError')) {
@@ -687,19 +753,17 @@ function App() {
             <div className="step__nav">
               <div className="step__navleft">
                 <CsvGuide />
-                <button
-                  type="button"
-                  className="step__back"
-                  disabled={authChecking || !canProceed}
-                  onClick={() => void onTestConnection()}
-                >
-                  {authChecking ? 'Testing…' : '🔌 Test Connection'}
-                </button>
+                {!canProceed && <span className="step__hint">Select at least one system to continue.</span>}
               </div>
               <div className="step__navright">
-                <span className="step__hint">
-                  {canProceed ? `Ready — working on ${systemsLabel}.` : 'Select at least one system to continue.'}
-                </span>
+                <button
+                  type="button"
+                  className="run__btn"
+                  disabled={authChecking || !canProceed}
+                  onClick={() => onValidateClick()}
+                >
+                  {authChecking ? 'Validating…' : '🔌 Validate Connections'}
+                </button>
                 <button type="button" className="run__btn run__btn--primary" disabled={!canProceed} onClick={() => void continueToActions()}>
                   Continue to actions →
                 </button>
@@ -711,7 +775,7 @@ function App() {
         {step === 'action' && (
           <section className="step" key="action">
             <div className="step__crumb">
-              <span className="step__on">
+              <span className="step__on" title={systemsTooltip}>
                 Working on <strong>{systemsLabel}</strong>
               </span>
             </div>
@@ -740,7 +804,7 @@ function App() {
         {step === 'results' && (
           <section className="step" key="results">
             <div className="step__crumb">
-              <span className="step__on">
+              <span className="step__on" title={systemsTooltip}>
                 Working on <strong>{systemsLabel}</strong>
               </span>
             </div>
@@ -751,6 +815,8 @@ function App() {
               onReenterPassword={isTest ? () => void reenterTestPassword() : undefined}
               onStop={() => run.cancel()}
               titles={resultTitles}
+              exitCategories={exitCategories}
+              onOpenSettings={() => setSettingsOpen(true)}
             />
 
             {batchQueue && run.status === 'done' && batchQueue.idx < batchQueue.batches.length - 1 && (
@@ -781,19 +847,36 @@ function App() {
         onFxChange={setFx}
         shipFreq={shipFreq}
         onShipFreqChange={setShipFreq}
+        exitCategories={exitCategories}
+        onExitCategoriesChange={setExitCategories}
       />
       <UpdateBanner />
 
-      {(authResults || authError) && (
+      {authOpen && (authResults || authError) && (
         <div className="confirm__overlay" onMouseDown={closeAuth}>
           <div className="confirm" onMouseDown={(e) => e.stopPropagation()}>
             <div className="confirm__head">
-              <h3>Connection test</h3>
+              <h3>Validate Connections</h3>
             </div>
             {authError ? (
               <p className="app__runerror">✕ {authError}</p>
             ) : authResults ? (
               <>
+                {(() => {
+                  const OS_NAMES: Record<string, string> = {
+                    linux: 'Debian/Linux',
+                    openbsd: 'OpenBSD',
+                    routeros: 'RouterOS',
+                  }
+                  const fams = [...new Set(authResults.results.filter((r) => r.ok && r.os).map((r) => r.os as string))]
+                  return fams.length > 1 ? (
+                    <div className="authres__oswarn">
+                      ⚠ Mixed fleet: you're validating{' '}
+                      <strong>{fams.map((f) => OS_NAMES[f] ?? f).join(' + ')}</strong> systems. Make sure your action
+                      (and interpreter) is safe for all of them.
+                    </div>
+                  ) : null
+                })()}
                 <p className={`confirm__summary ${!authChecking && authResults.passed === authResults.total ? '' : 'authres--warn'}`}>
                   {authChecking ? (
                     <>
@@ -853,7 +936,11 @@ function App() {
                   title="Remove the failed systems from your selection"
                   onClick={() => {
                     const failed = authResults.results.filter((r) => !r.ok).map((r) => r.label)
-                    setSource(deselectHosts(source, failed))
+                    const next = deselectHosts(source, failed)
+                    setSource(next)
+                    // The remaining hosts all passed validation, so keep the
+                    // "validated" state by re-pointing the signature at them.
+                    setAuthSig(sigForSource(next))
                     closeAuth()
                   }}
                 >
@@ -872,7 +959,7 @@ function App() {
                   void onTestConnection()
                 }}
               >
-                {authChecking ? 'Testing…' : 'Test again'}
+                {authChecking ? 'Validating…' : 'Validate again'}
               </button>
             </div>
           </div>

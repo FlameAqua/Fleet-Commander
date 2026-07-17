@@ -382,7 +382,10 @@ ipcMain.on('fc:update:check', (e) => {
 ipcMain.on('fc:update:install', () => {
   if (!isDev) {
     stopBackend() // free the port + unlock the exe before the installer runs
-    autoUpdater.quitAndInstall()
+    // (isSilent=true) runs the NSIS installer silently — no wizard, keeps the
+    // existing install location/options, so updates are fast and don't re-ask
+    // anything. (isForceRunAfter=true) relaunches the app afterwards.
+    autoUpdater.quitAndInstall(true, true)
   }
 })
 

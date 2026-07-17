@@ -2388,7 +2388,11 @@ for key, ent in ENTITIES.items():
     if mode == "audit":
         pass_count = fail_count = 0
         for item in items:
-            name = str(ent["name_of"](item))
+            # Singletons have no Number/Name/Id — label them by entity.
+            if is_singleton or bool(ent.get("singleton")):
+                name = str(ent["label"])
+            else:
+                name = str(ent["name_of"](item))
             if ent["skip"](item):
                 print("  [SKIP] " + name)
                 continue
@@ -2505,7 +2509,12 @@ for key, ent in ENTITIES.items():
                   + str(ent["name_of"](_clone_source_item)))
 
     for item in items:
-        name = str(ent["name_of"](item))
+        # A singleton has no Number/Name/Id, so name_of would print the
+        # useless "(unnamed)". Use the entity's label instead.
+        if is_singleton or bool(ent.get("singleton")):
+            name = str(ent["label"])
+        else:
+            name = str(ent["name_of"](item))
         if ent["skip"](item):
             print("  [" + name + "]  SKIPPED")
             continue
@@ -2623,7 +2632,16 @@ for key, ent in ENTITIES.items():
         _resolve_blfs_in_patch(changes)
         print("  [" + name + "]  patching " + "; ".join(notes) + " ... ",
               end="", flush=True)
-        code, err = api_patch(ent["path"] + "(" + str(item.get("Id", "")) + ")", changes)
+        # Singletons (AntiHackingSettings, MailSettings, ...) are a single
+        # object at the bare path — they have no Id, so the OData key segment
+        # that collection items need would render as "AntiHackingSettings()"
+        # and 404. PATCH the path directly instead, same as import does.
+        _is_single = is_singleton or bool(ent.get("singleton"))
+        if _is_single:
+            _patch_path = ent["path"]
+        else:
+            _patch_path = ent["path"] + "(" + str(item.get("Id", "")) + ")"
+        code, err = api_patch(_patch_path, changes)
         if code in (200, 204):
             extra = ""
             if missing:
@@ -3008,10 +3026,13 @@ def _build_host_vars_prelude(host_vars: Dict[str, str]) -> str:
     an environment variable. Caller prepends this to the user's script so
     the variables are visible to every command in it.
 
-    Security: the caller is expected to have already filtered out columns
-    that should NEVER be exposed (notably ``Password`` — letting it leak
-    via ``env`` or a child process's environment is exactly the kind of
-    accident we built this tool to avoid).
+    Security: the caller decides what may be exposed and filters the rest
+    out first — e.g. the per-host root-password column is popped in
+    ``app.py`` so it never reaches a script's environment. ``Password``
+    (the SSH credential) IS deliberately exposed as ``$Password``: the 3CX
+    action reads it, and custom scripts have relied on it since the opt-in
+    checkbox was retired. Anything added here is visible to ``env`` and to
+    every child process of the script.
 
     Quoting: values are single-quoted with POSIX ``'`` → ``'\\''`` escaping,
     so any payload — including embedded quotes, newlines, $variables, and
@@ -3217,13 +3238,24 @@ def _exec_with_su(
     return "\n".join(cleaned_lines).strip(), exit_status
 
 
+def _classify_os(uname_s: str) -> str:
+    """Map `uname -s` output to a coarse OS family for the mixed-fleet check."""
+    u = (uname_s or "").strip().lower()
+    if "openbsd" in u:
+        return "openbsd"
+    if "linux" in u:
+        return "linux"  # Debian / 3CX and other Linux
+    return ""  # unknown (RouterOS has no uname, etc.)
+
+
 def check_auth(target: Target, password: str, cfg: DeployConfig):
     """
-    Connect-only SSH auth test for *target*. Returns ``(ok, error)`` — no
-    command is run. Lets the UI verify credentials before preparing an action.
+    Connect-only SSH auth test for *target*. Returns ``(ok, error, os)`` — no
+    action script is run, but a quick ``uname -s`` classifies the OS family
+    ("linux" / "openbsd" / "") so the UI can warn about a mixed fleet.
     """
     if not password:
-        return (False, "no password available for this host")
+        return (False, "no password available for this host", "")
     client = _make_client(cfg.strict_host_keys)
     try:
         client.connect(
@@ -3239,13 +3271,26 @@ def check_auth(target: Target, password: str, cfg: DeployConfig):
         )
         if not cfg.strict_host_keys:
             _save_known_hosts(client)
-        return (True, "")
+        os_family = ""
+        try:
+            # MikroTik RouterOS identifies its SSH server as "SSH-2.0-ROSSSH"
+            # and has no `uname` — detect it from the banner and skip the probe.
+            tr = client.get_transport()
+            banner = (getattr(tr, "remote_version", "") or "") if tr is not None else ""
+            if "rosssh" in banner.lower() or "mikrotik" in banner.lower():
+                os_family = "routeros"
+            else:
+                _in, out, _err = client.exec_command("uname -s", timeout=cfg.connect_timeout)
+                os_family = _classify_os(out.read().decode("utf-8", "replace"))
+        except Exception:  # noqa: BLE001 - OS probe is best-effort
+            os_family = ""
+        return (True, "", os_family)
     except paramiko.AuthenticationException:
-        return (False, "authentication failed")
+        return (False, "authentication failed", "")
     except (paramiko.SSHException, socket.timeout, socket.error, OSError) as e:
-        return (False, f"connection error: {e}")
+        return (False, f"connection error: {e}", "")
     except Exception as e:  # noqa: BLE001 - last-resort guard
-        return (False, f"unexpected error: {e}")
+        return (False, f"unexpected error: {e}", "")
     finally:
         try:
             client.close()

@@ -11,6 +11,11 @@
 .settings {
   width: min(560px, 94vw);
   max-height: 88vh;
+  /* Pin the modal to its own composited layer. Flex-centring can land it on a
+     half-pixel, and a repaint (e.g. a button's :hover background) then lets the
+     compositor re-snap the raster origin — which reads as the section nudging
+     and settling back. A stable layer keeps the origin fixed. */
+  transform: translateZ(0);
   /* Flex column: fixed header + scrolling body. The scroll (and its scrollbar)
      lives on .settings__body only, so it never runs alongside the header. */
   display: flex;
@@ -152,6 +157,49 @@
 .settings__btn:disabled {
   opacity: 0.5;
   cursor: default;
+}
+.settings__cats {
+  margin: 0.3rem 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.3rem 0.6rem;
+}
+.settings__catrow {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.settings__catcode {
+  font-size: 0.7rem;
+  color: var(--muted);
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 0.1rem 0.35rem;
+  flex: none;
+  width: 3.4rem;
+  text-align: center;
+}
+.settings__catname {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 0.28rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+}
+.settings__catname:disabled {
+  color: var(--muted);
+  background: rgba(127, 127, 127, 0.08);
+  cursor: default;
+}
+@media (max-width: 480px) {
+  .settings__cats {
+    grid-template-columns: 1fr;
+  }
 }
 .settings__slider {
   display: flex;

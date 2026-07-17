@@ -87,6 +87,12 @@
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
+  /* Sit in an explicit layer above the animation backdrops (all z-index:0).
+     Without this the content ties with them on z-index and is only kept on top
+     by DOM order — which a re-mounted, GPU-composited animation layer (toggling
+     an effect off/on in Settings) can flip, painting it over the UI. */
+  position: relative;
+  z-index: 1;
 }
 
 /* Roadmap stepper — the three stages (fleet → action → results) at the top.
@@ -271,6 +277,15 @@
   color: var(--muted);
   font-size: 0.8rem;
   border-style: dashed !important;
+}
+.authres__oswarn {
+  margin: 0.4rem 0 0;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid #d6a93a;
+  border-radius: 6px;
+  background: rgba(214, 169, 58, 0.12);
+  color: var(--text);
+  font-size: 0.83rem;
 }
 .authres__title {
   font-weight: 600;

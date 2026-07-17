@@ -55,6 +55,21 @@
   font-size: 0.92rem;
   color: var(--text-h);
 }
+.csvguide__rec {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.csvguide__recbadge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #fff;
+  background: #46c46a;
+  padding: 0.02rem 0.4rem;
+  border-radius: 999px;
+}
 .csvguide p,
 .csvguide li {
   font-size: 0.88rem;

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { createPortal } from 'react-dom'
 import { downloadBlob } from '../../lib/file'
 import type { DeployRun, HostCard } from './useDeployRun'
+import type { ExitCategory } from './exitCategories'
 import './run.css'
 
 function displayHost(label: string): string {
@@ -21,29 +22,33 @@ function timestamp(): string {
   return new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').slice(0, 19)
 }
 
-type Outcome = 'success' | 'failure' | 'error' | 'running' | 'queued'
+type Outcome = 'success' | 'failure' | 'error' | 'running' | 'queued' | 'skipped'
 
-// exit 0 → success, exit 2 → predictable failure (e.g. failed audit),
-// anything else on a failed host → unpredictable error.
-function outcomeOf(card: HostCard): Outcome {
+// Visual outcome (drives the dot colour). exit 0 → success; a failed host whose
+// exit code matches a configured category → "failure" (amber); any other
+// non-zero → "error" (red); a host stopped before returning → "skipped".
+function outcomeOf(card: HostCard, cats: ExitCategory[]): Outcome {
   if (card.status === 'ok') return 'success'
-  if (card.status === 'fail') return card.exitStatus === 2 ? 'failure' : 'error'
+  if (card.status === 'skipped') return 'skipped'
+  if (card.status === 'fail') return cats.some((c) => c.code === card.exitStatus) ? 'failure' : 'error'
   return card.status
 }
 
-const OUTCOME_LABEL: Record<Outcome, string> = {
-  success: 'success',
-  failure: 'failure',
-  error: 'error',
-  running: 'running',
-  queued: 'queued',
+// Human label for a card's group — a category label for matched exit codes.
+function groupLabelOf(card: HostCard, cats: ExitCategory[]): string {
+  if (card.status === 'ok') return 'OK'
+  if (card.status === 'skipped') return 'Skipped'
+  if (card.status === 'running') return 'Running'
+  if (card.status === 'queued') return 'Queued'
+  const cat = cats.find((c) => c.code === card.exitStatus)
+  return cat ? cat.label : 'Error'
 }
 
-function cardLog(card: HostCard): string {
+function cardLog(card: HostCard, cats: ExitCategory[]): string {
   const out = card.output != null ? card.output : card.lines.join('\n')
   return [
     `Host:      ${card.label}`,
-    `Outcome:   ${OUTCOME_LABEL[outcomeOf(card)]}`,
+    `Outcome:   ${groupLabelOf(card, cats)}`,
     `Exit code: ${card.exitStatus ?? '(none)'}`,
     `Stage:     ${card.stage ?? ''}`,
     `Message:   ${card.message ?? ''}`,
@@ -63,10 +68,15 @@ interface Props {
   onStop: () => void
   /** Optional per-host title/account (label → title). */
   titles?: Record<string, string>
+  /** User-configured exit-code categories (from Settings → Folders). */
+  exitCategories: ExitCategory[]
+  /** Open the Settings modal (from the export help hint). */
+  onOpenSettings: () => void
 }
 
-export function ResultsPanel({ run, onFallback, onReenterPassword, onStop, titles = {} }: Props) {
+export function ResultsPanel({ run, onFallback, onReenterPassword, onStop, titles = {}, exitCategories, onOpenSettings }: Props) {
   const { status, meta, fatal, cards, failedLabels } = run
+  const [exportSel, setExportSel] = useState('all')
   const [openSet, setOpenSet] = useState<Set<string>>(new Set())
   const [ctx, setCtx] = useState<{ x: number; y: number; title: string; url: string } | null>(null)
   if (status === 'idle' && !cards.length && !fatal) return null
@@ -87,19 +97,49 @@ export function ResultsPanel({ run, onFallback, onReenterPassword, onStop, title
   }
 
   const byOutcome = {
-    success: cards.filter((c) => outcomeOf(c) === 'success'),
-    failure: cards.filter((c) => outcomeOf(c) === 'failure'),
-    error: cards.filter((c) => outcomeOf(c) === 'error'),
+    success: cards.filter((c) => outcomeOf(c, exitCategories) === 'success'),
+    failure: cards.filter((c) => outcomeOf(c, exitCategories) === 'failure'),
+    error: cards.filter((c) => outcomeOf(c, exitCategories) === 'error'),
+    skipped: cards.filter((c) => outcomeOf(c, exitCategories) === 'skipped'),
   }
-  const n = { ok: byOutcome.success.length, failed: byOutcome.failure.length, errors: byOutcome.error.length }
+  const n = {
+    ok: byOutcome.success.length,
+    failed: byOutcome.failure.length,
+    errors: byOutcome.error.length,
+    skipped: byOutcome.skipped.length,
+  }
+
+  // Export groups shown in the dropdown: All, OK, one per exit-code category
+  // that occurred, Error, Skipped.
+  const exportGroups: { value: string; label: string; cards: HostCard[] }[] = [
+    { value: 'all', label: `All (${cards.length})`, cards },
+  ]
+  if (byOutcome.success.length)
+    exportGroups.push({ value: 'ok', label: `OK (${byOutcome.success.length})`, cards: byOutcome.success })
+  for (const cat of exitCategories) {
+    const cc = cards.filter((c) => c.status === 'fail' && c.exitStatus === cat.code)
+    if (cc.length) exportGroups.push({ value: `code-${cat.code}`, label: `${cat.label} (${cc.length})`, cards: cc })
+  }
+  if (byOutcome.error.length)
+    exportGroups.push({ value: 'error', label: `Error (${byOutcome.error.length})`, cards: byOutcome.error })
+  if (byOutcome.skipped.length)
+    exportGroups.push({ value: 'skipped', label: `Skipped (${byOutcome.skipped.length})`, cards: byOutcome.skipped })
+  const activeSel = exportGroups.some((g) => g.value === exportSel) ? exportSel : 'all'
+  const activeGroup = exportGroups.find((g) => g.value === activeSel) ?? exportGroups[0]
 
   function exportOne(card: HostCard) {
-    downloadBlob(new Blob([cardLog(card)], { type: 'text/plain' }), `${safeName(card.label)}_${outcomeOf(card)}.log`)
+    downloadBlob(
+      new Blob([cardLog(card, exitCategories)], { type: 'text/plain' }),
+      `${safeName(card.label)}_${outcomeOf(card, exitCategories)}.log`,
+    )
   }
   function exportGroup(group: HostCard[], tag: string) {
     if (!group.length) return
     const divider = '\n' + '='.repeat(64) + '\n\n'
-    downloadBlob(new Blob([group.map(cardLog).join(divider)], { type: 'text/plain' }), `fleet-logs-${tag}_${timestamp()}.txt`)
+    downloadBlob(
+      new Blob([group.map((c) => cardLog(c, exitCategories)).join(divider)], { type: 'text/plain' }),
+      `fleet-logs-${tag}_${timestamp()}.txt`,
+    )
   }
 
   return (
@@ -111,8 +151,16 @@ export function ResultsPanel({ run, onFallback, onReenterPassword, onStop, title
         <div className="results__counts">
           {meta && <span>{meta.count} host{meta.count === 1 ? '' : 's'}</span>}
           {(n.ok > 0 || status === 'done') && <span className="is-ok">{n.ok} ok</span>}
-          {(n.failed > 0 || status === 'done') && <span className="is-fail">{n.failed} failed</span>}
+          {exitCategories.map((cat) => {
+            const c = cards.filter((x) => x.status === 'fail' && x.exitStatus === cat.code).length
+            return c > 0 ? (
+              <span key={cat.code} className="is-fail">
+                {c} {cat.label.toLowerCase()}
+              </span>
+            ) : null
+          })}
           {(n.errors > 0 || status === 'done') && <span className="is-err">{n.errors} errors</span>}
+          {n.skipped > 0 && <span className="is-skip">{n.skipped} skipped</span>}
           {status === 'running' && <span className="results__spin">running…</span>}
         </div>
       </div>
@@ -120,17 +168,29 @@ export function ResultsPanel({ run, onFallback, onReenterPassword, onStop, title
       {cards.length > 0 && (
         <div className="results__exports">
           <span className="results__exports-label">Export logs:</span>
-          <button type="button" className="results__exportbtn" onClick={() => exportGroup(cards, 'all')}>
-            All ({cards.length})
+          <select
+            className="results__exportsel"
+            value={activeSel}
+            onChange={(e) => setExportSel(e.target.value)}
+            aria-label="Choose which results to export"
+          >
+            {exportGroups.map((g) => (
+              <option key={g.value} value={g.value}>
+                {g.label}
+              </option>
+            ))}
+          </select>
+          <button type="button" className="results__exportbtn" onClick={() => exportGroup(activeGroup.cards, activeSel)}>
+            ⬇ Export
           </button>
-          <button type="button" className="results__exportbtn" disabled={!n.ok} onClick={() => exportGroup(byOutcome.success, 'ok')}>
-            OK ({n.ok})
-          </button>
-          <button type="button" className="results__exportbtn" disabled={!n.failed} onClick={() => exportGroup(byOutcome.failure, 'failed')}>
-            Failed ({n.failed})
-          </button>
-          <button type="button" className="results__exportbtn" disabled={!n.errors} onClick={() => exportGroup(byOutcome.error, 'errors')}>
-            Errors ({n.errors})
+          <button
+            type="button"
+            className="results__exporthelp"
+            title="These groups come from your exit-code categories (e.g. exit 2 = Failure). Add or edit them in Settings → Folders."
+            aria-label="About exit-code categories"
+            onClick={onOpenSettings}
+          >
+            ?
           </button>
         </div>
       )}
@@ -145,9 +205,12 @@ export function ResultsPanel({ run, onFallback, onReenterPassword, onStop, title
             n.errors > 0 ? 'results__outcome--error' : n.failed > 0 ? 'results__outcome--failure' : 'results__outcome--success'
           }`}
         >
-          {n.errors === 0 && n.failed === 0
+          {n.errors === 0 && n.failed === 0 && n.skipped === 0
             ? `✓ All ${n.ok} system${n.ok === 1 ? '' : 's'} completed successfully`
-            : `Done — ${n.ok} ok` + (n.failed ? `, ${n.failed} failed` : '') + (n.errors ? `, ${n.errors} errored` : '')}
+            : `Done — ${n.ok} ok` +
+              (n.failed ? `, ${n.failed} failed` : '') +
+              (n.errors ? `, ${n.errors} errored` : '') +
+              (n.skipped ? `, ${n.skipped} skipped` : '')}
         </div>
       )}
 
@@ -157,6 +220,7 @@ export function ResultsPanel({ run, onFallback, onReenterPassword, onStop, title
             key={c.label}
             card={c}
             title={titles[c.label]}
+            categories={exitCategories}
             open={openSet.has(c.label)}
             onToggle={() => toggleCard(c.label)}
             onExport={() => exportOne(c)}
@@ -259,6 +323,7 @@ function CardContextMenu({
 function Card({
   card,
   title,
+  categories,
   open,
   onToggle,
   onExport,
@@ -266,13 +331,14 @@ function Card({
 }: {
   card: HostCard
   title?: string
+  categories: ExitCategory[]
   open: boolean
   onToggle: () => void
   onExport: () => void
   onContext: (x: number, y: number, title: string, url: string) => void
 }) {
   const body = card.output != null ? card.output : card.lines.join('\n')
-  const outcome = outcomeOf(card)
+  const outcome = outcomeOf(card, categories)
   const host = displayHost(card.label)
   const meta = [
     card.stage,
@@ -354,5 +420,7 @@ function statusText(s: HostCard['status']): string {
       return 'done'
     case 'fail':
       return 'failed'
+    case 'skipped':
+      return 'skipped'
   }
 }

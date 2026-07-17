@@ -1,5 +1,9 @@
 import { useRef, useState } from 'react'
+import { useToast } from './ToastProvider'
 import './scriptEditor.css'
+
+const VARIABLES_HELP =
+  'Use your CSV column titles as per-system variables — type $ to insert one (e.g. $SiteCode). Each host gets that column’s value.'
 
 interface Menu {
   left: number
@@ -57,6 +61,8 @@ interface Props {
   /** When provided, a cmd icon (left of the `?`) lets the operator pick the interpreter. */
   interpreter?: Interpreter
   onInterpreterChange?: (i: Interpreter) => void
+  /** Fired when the textarea gains focus (used for a one-off first-use tip). */
+  onFocus?: () => void
 }
 
 /** Script textarea with a `$`-triggered variable dropdown and a help hint. */
@@ -68,7 +74,9 @@ export function ScriptEditor({
   className,
   interpreter = 'auto',
   onInterpreterChange,
+  onFocus,
 }: Props) {
+  const toast = useToast()
   const ref = useRef<HTMLTextAreaElement>(null)
   const [menu, setMenu] = useState<Menu | null>(null)
   const [interpOpen, setInterpOpen] = useState(false)
@@ -122,7 +130,7 @@ export function ScriptEditor({
             type="button"
             className={`se__cmd${interpreter === 'routeros' ? ' is-active' : ''}`}
             tabIndex={-1}
-            title={`Interpreter: ${interpreter === 'routeros' ? 'RouterOS (MikroTik)' : 'Auto-detect (bash / sh)'}`}
+            title={`Interpreter: ${interpreter === 'routeros' ? 'RouterOS (MikroTik)' : 'Auto-detect shell (bash / sh) — not RouterOS'}`}
             onClick={() => setInterpOpen((o) => !o)}
           >
             <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true">
@@ -141,7 +149,7 @@ export function ScriptEditor({
                     className={interpreter === 'auto' ? 'is-sel' : ''}
                     onClick={() => { onInterpreterChange('auto'); setInterpOpen(false) }}
                   >
-                    Auto-detect (bash / sh)
+                    Auto-detect shell (bash / sh)
                   </button>
                 </li>
                 <li>
@@ -162,10 +170,8 @@ export function ScriptEditor({
         type="button"
         className="se__help"
         tabIndex={-1}
-        title={
-          'You can use your CSV column titles as per-system variables. Type $ to insert one ' +
-          '(e.g. $SiteCode), and the value for each host comes from that column in your CSV.'
-        }
+        aria-label="How variables work"
+        onClick={() => toast(VARIABLES_HELP, 'tip')}
       >
         ?
       </button>
@@ -182,6 +188,7 @@ export function ScriptEditor({
         onKeyUp={(e) => refreshMenu(e.currentTarget)}
         onClick={(e) => refreshMenu(e.currentTarget)}
         onScroll={(e) => menu && refreshMenu(e.currentTarget)}
+        onFocus={() => onFocus?.()}
         onBlur={() => setTimeout(() => setMenu(null), 150)}
       />
       {menu && filtered.length > 0 && (

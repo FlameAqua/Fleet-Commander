@@ -350,6 +350,8 @@ export interface AuthResult {
   label: string
   ok: boolean
   error: string
+  /** OS family from `uname -s`: 'linux' | 'openbsd' | '' (unknown). */
+  os?: string
 }
 
 export interface AuthCheckHandlers {
@@ -403,7 +405,7 @@ export async function authCheck(form: FormData, h: AuthCheckHandlers): Promise<v
     }
     if (ev.type === 'meta') h.onMeta?.(ev.total as number)
     else if (ev.type === 'result')
-      h.onResult?.({ label: ev.label as string, ok: ev.ok as boolean, error: (ev.error as string) ?? '' })
+      h.onResult?.({ label: ev.label as string, ok: ev.ok as boolean, error: (ev.error as string) ?? '', os: (ev.os as string) ?? '' })
     else if (ev.type === 'done') h.onDone?.(ev.passed as number, ev.total as number)
     else if (ev.type === 'fatal') h.onFatal?.(ev.message as string)
   }

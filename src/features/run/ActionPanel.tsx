@@ -6,7 +6,9 @@ import './run.css'
 interface ActionDef {
   id: ActionId
   label: string
-  blurb: string
+  /** Intro line above the action's body. Omit when the action's own UI
+   *  (e.g. 3CX Manager's sub-tabs) already says what it does. */
+  blurb?: string
 }
 
 interface TabDef {
@@ -26,7 +28,9 @@ const TABS: TabDef[] = [
   {
     id: 'threecx',
     label: '3CX Manager',
-    actions: [{ id: 'threecx', label: '3CX Manager', blurb: 'Audit, modify, export, or import 3CX xAPI configuration on the selected systems.' }],
+    // No blurb: the panel's own Quick Actions / Audit / Modify / Export /
+    // Import tabs sit at the top and already convey this.
+    actions: [{ id: 'threecx', label: '3CX Manager' }],
   },
   {
     id: 'maintenance',
@@ -102,7 +106,7 @@ export function ActionPanel({ action, setAction, running, runHint, runHidden, on
               />
             )}
 
-            <p className="run__blurb">{current.blurb}</p>
+            {current.blurb && <p className="run__blurb">{current.blurb}</p>}
 
             {action === 'custom_script' && customScriptSlot}
             {action === 'threecx' && threecxSlot}

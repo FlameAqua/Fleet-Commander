@@ -2,9 +2,12 @@ import { useEffect } from 'react'
 import { ScriptsPanel } from '../scripts/ScriptsPanel'
 import { Segmented } from '../../components/Segmented'
 import { ScriptEditor } from '../../components/ScriptEditor'
+import { useTip } from '../../components/ToastProvider'
 import { readFileText } from '../../lib/file'
 import type { CustomScriptArgs, RootMode, ScriptInterpreter } from './deployForm'
 import './run.css'
+
+const EXIT_CODE_TIP = 'Use Exit Code 2 as a planned failure (e.g. a failed audit). Add more custom codes in the settings!'
 
 export type ScriptSource = 'library' | 'paste' | 'upload'
 
@@ -70,6 +73,8 @@ interface Props {
 
 export function CustomScriptPanel({ value, onChange, variables, csvAvailable }: Props) {
   const set = (patch: Partial<CustomScriptState>) => onChange({ ...value, ...patch })
+  const tip = useTip()
+  const showExitTip = () => tip('exit-codes', EXIT_CODE_TIP)
 
   // The "root password from a CSV column" mode only makes sense with an
   // imported CSV. If the source changes away from CSV while it's selected,
@@ -108,6 +113,7 @@ export function CustomScriptPanel({ value, onChange, variables, csvAvailable }: 
           variables={variables}
           interpreter={value.interpreter}
           onInterpreterChange={(i) => set({ interpreter: i })}
+          onFocus={showExitTip}
         />
       )}
 

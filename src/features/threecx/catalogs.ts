@@ -1,4 +1,5 @@
-// Static 3CX data ported verbatim from the original UI:
+// Static 3CX data:
+//  - TCX_ENUMS          : enum members, verified against the PBX's $metadata
 //  - TCX_EXTRA_CATALOGS : curated common fields per entity (with type + default)
 //  - TCX_ENDPOINTS      : the addable xAPI entities ("Add endpoint" picker)
 //  - GOLDEN_STANDARD_*  : the Default-Fields preset (Phase 5b)
@@ -20,12 +21,59 @@ export interface Endpoint {
   recommended?: boolean
 }
 
+// Enum members transcribed from the PBX's OData schema (GET /xapi/v1/$metadata).
+// Most of these appear on several entities; defining each once is what stops the
+// copies drifting apart. The key names are ours — $metadata's own type names are
+// not exposed here. Verify against $metadata before editing any member list.
+export const TCX_ENUMS = {
+  TranscriptionMode: ['Nothing', 'Voicemail', 'Recordings', 'Both', 'Inherit'],
+  CallUsRequirement: ['Both', 'Name', 'Email', 'None'],
+  VMEmailOptions: ['None', 'Notification', 'Attachment', 'AttachmentAndDelete', 'VmailToMembers', 'EmailToExtrasOnly'],
+  VMPlayMsgDateTime: ['None', 'Play12Hr', 'Play24Hr'],
+  SRTPMode: ['SRTPDisabled', 'SRTPEnabled', 'SRTPEnforced'],
+  // Pbx.Schedule.Type — used for both Hours.Type and BreakTime.Type.
+  ScheduleType: [
+    'AllHours', 'OfficeHours', 'OutOfOfficeHours', 'SpecificHours',
+    'SpecificHoursExcludingHolidays', 'OutOfSpecificHours',
+    'OutOfSpecificHoursIncludingHolidays', 'Never', 'BreakTime',
+  ],
+  // Pbx.Destination.To — where a call is sent.
+  DestinationTo: [
+    'None', 'VoiceMail', 'Extension', 'Queue', 'RingGroup', 'IVR', 'External',
+    'Fax', 'Boomerang', 'Deflect', 'VoiceMailOfDestination', 'Callback',
+    'RoutePoint', 'ProceedWithNoExceptions',
+  ],
+  // Pbx.Destination.Type — what kind of object the destination is.
+  PeerType: [
+    'None', 'Extension', 'Queue', 'RingGroup', 'IVR', 'Fax', 'Conference',
+    'SpecialMenu', 'Parking', 'ExternalLine', 'Group', 'RoutePoint',
+  ],
+  CallType: ['AllCalls', 'InternalCallsOnly', 'ExternalCallsOnly'],
+  RuleCondition: ['NoAnswer', 'PhoneBusy', 'PhoneNotRegistered', 'ForwardAll', 'BasedOnCallerID', 'BasedOnDID'],
+  TrunkDirection: ['None', 'Inbound', 'Outbound', 'Both'],
+  ProvisioningMethod: ['LocalLan', 'RemoteExt', 'RemoteExtSipProxyMgr', 'SBC'],
+  PollingStrategy: [
+    'Hunt', 'RingAll', 'HuntRandomStart', 'NextAgent', 'LongestWaiting',
+    'LeastTalkTime', 'FewestAnswered', 'HuntBy3s', 'First3Available',
+    'SkillBasedRouting_RingAll', 'SkillBasedRouting_HuntRandomStart',
+    'SkillBasedRouting_RoundRobin', 'SkillBasedRouting_FewestAnswered',
+  ],
+  QueueRecording: ['Disabled', 'AllowToOptOut', 'AskToOptIn'],
+  ChatOwnership: ['TakeManually', 'AutoAssign'],
+  RingStrategy: ['Hunt', 'RingAll', 'Paging'],
+  IVRType: ['Default', 'CodeBased', 'ScriptBased', 'Wakeup'],
+  IVRForwardType: ['EndCall', 'Extension', 'RingGroup', 'Queue', 'IVR', 'VoiceMail', 'CallByName', 'RepeatPrompt', 'CustomInput'],
+  SbcLogLevel: ['None', 'Low', 'Medium', 'Verbose'],
+  SbcSecurity: ['TCP', 'TLS'],
+  XferType: ['BXfer', 'AttXfer'],
+} satisfies Record<string, string[]>
+
 export const TCX_EXTRA_CATALOGS: Record<string, CatalogField[]> = {
   trunks: [
     { field: 'Gateway.DeliverAudio', type: 'bool', default: true },
     { field: 'Gateway.Codecs', type: 'list', default: ['PCMA', 'G722'] },
     { field: 'DisableVideo', type: 'bool', default: false },
-    { field: 'Direction', type: 'enum', options: ['Both', 'Inbound', 'Outbound'], default: 'Both' },
+    { field: 'Direction', type: 'enum', options: TCX_ENUMS.TrunkDirection, default: 'Both' },
     { field: 'EnableInboundCalls', type: 'bool', default: true },
     { field: 'EnableOutboundCalls', type: 'bool', default: true },
     { field: 'DisableCallTransfer', type: 'bool', default: false },
@@ -39,15 +87,17 @@ export const TCX_EXTRA_CATALOGS: Record<string, CatalogField[]> = {
   ],
   users: [
     { field: 'Phones.*.Settings.Codecs', type: 'list', default: ['PCMA', 'G722'] },
-    { field: 'Phones.*.Settings.DateFormat', type: 'enum', options: ['15 JAN MON', '15-01-2025', '2025-01-15', '01/15/2025'], default: '15 JAN MON' },
-    { field: 'Phones.*.Settings.TimeFormat', type: 'enum', options: ['24-hour clock', '12-hour clock'], default: '24-hour clock' },
+    // DateFormat / TimeFormat / Backlight are free-form String in $metadata, not
+    // enums — the PBX does not constrain them, so we cannot offer a verified list.
+    { field: 'Phones.*.Settings.DateFormat', type: 'str', default: '15 JAN MON' },
+    { field: 'Phones.*.Settings.TimeFormat', type: 'str', default: '24-hour clock' },
     { field: 'Phones.*.Settings.TimeZone', type: 'str', default: '' },
     { field: 'Phones.*.Settings.PhoneLanguage', type: 'str', default: 'English' },
-    { field: 'Phones.*.Settings.Backlight', type: 'enum', options: ['Always on', '10 seconds', '30 seconds', '1 minute', '5 minutes', '10 minutes', '30 minutes', '1 hour'], default: '30 seconds' },
+    { field: 'Phones.*.Settings.Backlight', type: 'str', default: '30 seconds' },
     { field: 'Phones.*.Settings.ScreenSaver', type: 'str', default: '' },
     { field: 'Phones.*.Settings.RingTone', type: 'str', default: 'Default' },
     { field: 'Phones.*.Settings.QueueRingTone', type: 'str', default: 'Ring 6' },
-    { field: 'Phones.*.Settings.XferType', type: 'enum', options: ['BXfer', 'AXfer'], default: 'BXfer' },
+    { field: 'Phones.*.Settings.XferType', type: 'enum', options: TCX_ENUMS.XferType, default: 'BXfer' },
     { field: 'Phones.*.Settings.PowerLed', type: 'str', default: 'Both (Voicemail and Missed calls)' },
     { field: 'Phones.*.Settings.SbcName', type: 'str', default: '' },
     { field: 'Phones.*.TemplateName', type: 'str', default: 'fanvil.ph.xml' },
@@ -66,13 +116,13 @@ export const TCX_EXTRA_CATALOGS: Record<string, CatalogField[]> = {
     { field: 'VMEnabled', type: 'bool', default: true },
     { field: 'VMPlayCallerID', type: 'bool', default: false },
     { field: 'VMDisablePinAuth', type: 'bool', default: false },
-    { field: 'VMEmailOptions', type: 'enum', options: ['AttachmentAndDelete', 'Attachment', 'Notification', 'None'], default: 'Notification' },
-    { field: 'VMPlayMsgDateTime', type: 'enum', options: ['None', 'Date', 'Time', 'DateTime'], default: 'None' },
+    { field: 'VMEmailOptions', type: 'enum', options: TCX_ENUMS.VMEmailOptions, default: 'Notification' },
+    { field: 'VMPlayMsgDateTime', type: 'enum', options: TCX_ENUMS.VMPlayMsgDateTime, default: 'None' },
     { field: 'Enable2FA', type: 'bool', default: false },
     { field: 'Require2FA', type: 'bool', default: false },
     { field: 'PinProtected', type: 'bool', default: false },
     { field: 'PinProtectTimeout', type: 'int', default: 60 },
-    { field: 'SRTPMode', type: 'str', default: 'SRTPDisabled' },
+    { field: 'SRTPMode', type: 'enum', options: TCX_ENUMS.SRTPMode, default: 'SRTPDisabled' },
     { field: 'CallScreening', type: 'bool', default: false },
     { field: 'AllowLanOnly', type: 'bool', default: true },
     { field: 'EnableHotdesking', type: 'bool', default: false },
@@ -85,7 +135,7 @@ export const TCX_EXTRA_CATALOGS: Record<string, CatalogField[]> = {
     { field: 'CallUsEnableChat', type: 'bool', default: true },
     { field: 'CallUsEnablePhone', type: 'bool', default: false },
     { field: 'CallUsEnableVideo', type: 'bool', default: false },
-    { field: 'CallUsRequirement', type: 'enum', options: ['Both', 'Chat', 'Phone'], default: 'Both' },
+    { field: 'CallUsRequirement', type: 'enum', options: TCX_ENUMS.CallUsRequirement, default: 'Both' },
     { field: 'GoogleCalendarEnabled', type: 'bool', default: true },
     { field: 'GoogleContactsEnabled', type: 'bool', default: true },
     { field: 'GoogleSignInEnabled', type: 'bool', default: true },
@@ -95,7 +145,7 @@ export const TCX_EXTRA_CATALOGS: Record<string, CatalogField[]> = {
     { field: 'MS365TeamsEnabled', type: 'bool', default: true },
     { field: 'DatevEnabled', type: 'bool', default: false },
     { field: 'AIAgent', type: 'bool', default: false },
-    { field: 'TranscriptionMode', type: 'enum', options: ['Inherit', 'Nothing', 'ExternalCallsOnly', 'AllCalls'], default: 'Inherit' },
+    { field: 'TranscriptionMode', type: 'enum', options: TCX_ENUMS.TranscriptionMode, default: 'Inherit' },
     { field: 'WebMeetingApproveParticipants', type: 'bool', default: false },
   ],
   outboundrules: [
@@ -126,7 +176,7 @@ export const TCX_EXTRA_CATALOGS: Record<string, CatalogField[]> = {
     { field: 'Brand', type: 'str', default: '' },
     { field: 'Model', type: 'str', default: '' },
     { field: 'FxsLineCount', type: 'int', default: 10 },
-    { field: 'Provisioning.Method', type: 'enum', options: ['SBC', 'Direct', 'STUN', 'RemoteSTUN', 'LOCALLAN', 'REMOTESTUN'], default: 'SBC' },
+    { field: 'Provisioning.Method', type: 'enum', options: TCX_ENUMS.ProvisioningMethod, default: 'SBC' },
     { field: 'Provisioning.LocalSipPort', type: 'int', default: 5060 },
     { field: 'Provisioning.LocalAudioPortStart', type: 'int', default: 9000 },
     { field: 'Provisioning.LocalAudioPortEnd', type: 'int', default: 10999 },
@@ -136,7 +186,7 @@ export const TCX_EXTRA_CATALOGS: Record<string, CatalogField[]> = {
     { field: 'Provisioning.SbcName', type: 'str', default: '' },
   ],
   queues: [
-    { field: 'PollingStrategy', type: 'enum', options: ['Hunt', 'RingAll', 'PriorityHunt', 'LongestWaiting', 'FewestAnswered', 'Round Robin'], default: 'Hunt' },
+    { field: 'PollingStrategy', type: 'enum', options: TCX_ENUMS.PollingStrategy, default: 'Hunt' },
     { field: 'RingTimeout', type: 'int', default: 20 },
     { field: 'MasterTimeout', type: 'int', default: 20 },
     { field: 'MaxCallersInQueue', type: 'int', default: 0 },
@@ -150,14 +200,14 @@ export const TCX_EXTRA_CATALOGS: Record<string, CatalogField[]> = {
     { field: 'EnableIntro', type: 'bool', default: false },
     { field: 'PlayFullPrompt', type: 'bool', default: false },
     { field: 'AgentAvailabilityMode', type: 'bool', default: false },
-    { field: 'Recording', type: 'enum', options: ['Disabled', 'ForcedRecording', 'NotForcedRecording'], default: 'Disabled' },
-    { field: 'TranscriptionMode', type: 'enum', options: ['Inherit', 'Nothing', 'ExternalCallsOnly', 'AllCalls'], default: 'Inherit' },
-    { field: 'TypeOfChatOwnershipType', type: 'enum', options: ['AutoAssign', 'RoundRobin', 'Manual'], default: 'AutoAssign' },
-    { field: 'VMEmailOptions', type: 'enum', options: ['AttachmentAndDelete', 'Attachment', 'Notification', 'None'], default: 'AttachmentAndDelete' },
+    { field: 'Recording', type: 'enum', options: TCX_ENUMS.QueueRecording, default: 'Disabled' },
+    { field: 'TranscriptionMode', type: 'enum', options: TCX_ENUMS.TranscriptionMode, default: 'Inherit' },
+    { field: 'TypeOfChatOwnershipType', type: 'enum', options: TCX_ENUMS.ChatOwnership, default: 'AutoAssign' },
+    { field: 'VMEmailOptions', type: 'enum', options: TCX_ENUMS.VMEmailOptions, default: 'AttachmentAndDelete' },
     { field: 'CallUsEnableChat', type: 'bool', default: false },
     { field: 'CallUsEnablePhone', type: 'bool', default: false },
     { field: 'CallUsEnableVideo', type: 'bool', default: false },
-    { field: 'CallUsRequirement', type: 'enum', options: ['Both', 'Chat', 'Phone'], default: 'Both' },
+    { field: 'CallUsRequirement', type: 'enum', options: TCX_ENUMS.CallUsRequirement, default: 'Both' },
     { field: 'ResetStatisticsScheduleEnabled', type: 'bool', default: false },
     { field: 'OnHoldFile', type: 'str', default: 'onhold.wav' },
     { field: 'GreetingFile', type: 'str', default: '' },
@@ -165,49 +215,49 @@ export const TCX_EXTRA_CATALOGS: Record<string, CatalogField[]> = {
     { field: 'PromptSet', type: 'str', default: '' },
   ],
   ringgroups: [
-    { field: 'RingStrategy', type: 'enum', options: ['RingAll', 'Hunt', 'Paging', 'HuntRandom', 'HuntStartFromOldestCalled'], default: 'RingAll' },
+    { field: 'RingStrategy', type: 'enum', options: TCX_ENUMS.RingStrategy, default: 'RingAll' },
     { field: 'RingTime', type: 'int', default: 30 },
     { field: 'GreetingFile', type: 'str', default: '' },
-    { field: 'TranscriptionMode', type: 'enum', options: ['Inherit', 'Nothing', 'ExternalCallsOnly', 'AllCalls'], default: 'Inherit' },
-    { field: 'VMEmailOptions', type: 'enum', options: ['AttachmentAndDelete', 'Attachment', 'Notification', 'None'], default: 'AttachmentAndDelete' },
+    { field: 'TranscriptionMode', type: 'enum', options: TCX_ENUMS.TranscriptionMode, default: 'Inherit' },
+    { field: 'VMEmailOptions', type: 'enum', options: TCX_ENUMS.VMEmailOptions, default: 'AttachmentAndDelete' },
     { field: 'CallUsEnableChat', type: 'bool', default: false },
     { field: 'CallUsEnablePhone', type: 'bool', default: false },
     { field: 'CallUsEnableVideo', type: 'bool', default: false },
-    { field: 'CallUsRequirement', type: 'enum', options: ['Both', 'Chat', 'Phone'], default: 'Both' },
-    { field: 'ForwardNoAnswer.To', type: 'enum', options: ['None', 'VoiceMail', 'Extension', 'Queue', 'RingGroup', 'IVR', 'External', 'BusyTone'], default: 'VoiceMail' },
-    { field: 'ForwardNoAnswer.Type', type: 'str', default: 'Extension' },
-    { field: 'BreakRoute.Route.To', type: 'enum', options: ['ProceedWithNoExceptions', 'None', 'VoiceMail', 'Extension', 'Queue', 'RingGroup', 'IVR', 'External'], default: 'ProceedWithNoExceptions' },
-    { field: 'HolidaysRoute.Route.To', type: 'enum', options: ['ProceedWithNoExceptions', 'None', 'VoiceMail', 'Extension', 'Queue', 'RingGroup', 'IVR', 'External'], default: 'ProceedWithNoExceptions' },
-    { field: 'OutOfOfficeRoute.Route.To', type: 'enum', options: ['ProceedWithNoExceptions', 'None', 'VoiceMail', 'Extension', 'Queue', 'RingGroup', 'IVR', 'External'], default: 'ProceedWithNoExceptions' },
+    { field: 'CallUsRequirement', type: 'enum', options: TCX_ENUMS.CallUsRequirement, default: 'Both' },
+    { field: 'ForwardNoAnswer.To', type: 'enum', options: TCX_ENUMS.DestinationTo, default: 'VoiceMail' },
+    { field: 'ForwardNoAnswer.Type', type: 'enum', options: TCX_ENUMS.PeerType, default: 'Extension' },
+    { field: 'BreakRoute.Route.To', type: 'enum', options: TCX_ENUMS.DestinationTo, default: 'ProceedWithNoExceptions' },
+    { field: 'HolidaysRoute.Route.To', type: 'enum', options: TCX_ENUMS.DestinationTo, default: 'ProceedWithNoExceptions' },
+    { field: 'OutOfOfficeRoute.Route.To', type: 'enum', options: TCX_ENUMS.DestinationTo, default: 'ProceedWithNoExceptions' },
   ],
   inboundrules: [
     { field: 'AlterDestinationDuringHolidays', type: 'bool', default: false },
     { field: 'AlterDestinationDuringOutOfOfficeHours', type: 'bool', default: true },
-    { field: 'CallType', type: 'enum', options: ['AllCalls', 'Voice', 'Video', 'Fax', 'Chat'], default: 'AllCalls' },
-    { field: 'Condition', type: 'enum', options: ['ForwardAll', 'ForwardDataMatched', 'ForwardCallerIDMatched'], default: 'ForwardAll' },
+    { field: 'CallType', type: 'enum', options: TCX_ENUMS.CallType, default: 'AllCalls' },
+    { field: 'Condition', type: 'enum', options: TCX_ENUMS.RuleCondition, default: 'ForwardAll' },
     { field: 'Data', type: 'str', default: '' },
     { field: 'CustomData', type: 'str', default: '' },
-    { field: 'Hours.Type', type: 'enum', options: ['OfficeHours', 'OutsideOfficeHours', 'SpecificHoursExcludingHolidays', 'AnyTime'], default: 'OfficeHours' },
+    { field: 'Hours.Type', type: 'enum', options: TCX_ENUMS.ScheduleType, default: 'OfficeHours' },
     { field: 'Hours.IgnoreHolidays', type: 'bool', default: false },
-    { field: 'OfficeHoursDestination.To', type: 'enum', options: ['None', 'VoiceMail', 'Extension', 'Queue', 'RingGroup', 'IVR', 'External', 'Fax'], default: 'Extension' },
-    { field: 'OutOfOfficeHoursDestination.To', type: 'enum', options: ['None', 'VoiceMail', 'Extension', 'Queue', 'RingGroup', 'IVR', 'External', 'Fax'], default: 'Extension' },
-    { field: 'HolidaysDestination.To', type: 'enum', options: ['None', 'VoiceMail', 'Extension', 'Queue', 'RingGroup', 'IVR', 'External', 'Fax'], default: 'None' },
+    { field: 'OfficeHoursDestination.To', type: 'enum', options: TCX_ENUMS.DestinationTo, default: 'Extension' },
+    { field: 'OutOfOfficeHoursDestination.To', type: 'enum', options: TCX_ENUMS.DestinationTo, default: 'Extension' },
+    { field: 'HolidaysDestination.To', type: 'enum', options: TCX_ENUMS.DestinationTo, default: 'None' },
   ],
   receptionists: [
     { field: 'Timeout', type: 'int', default: 10 },
-    { field: 'TimeoutForwardType', type: 'enum', options: ['EndCall', 'Extension', 'Queue', 'RingGroup', 'IVR', 'External', 'VoiceMail'], default: 'EndCall' },
+    { field: 'TimeoutForwardType', type: 'enum', options: TCX_ENUMS.IVRForwardType, default: 'EndCall' },
     { field: 'TimeoutForwardDN', type: 'str', default: '' },
     { field: 'InvalidKeyForwardDN', type: 'str', default: '' },
     { field: 'TransferEnable', type: 'bool', default: true },
     { field: 'UseMSExchange', type: 'bool', default: false },
-    { field: 'IVRType', type: 'enum', options: ['Default', 'Standard', 'Direct'], default: 'Default' },
-    { field: 'TranscriptionMode', type: 'enum', options: ['Inherit', 'Nothing', 'ExternalCallsOnly', 'AllCalls'], default: 'Inherit' },
+    { field: 'IVRType', type: 'enum', options: TCX_ENUMS.IVRType, default: 'Default' },
+    { field: 'TranscriptionMode', type: 'enum', options: TCX_ENUMS.TranscriptionMode, default: 'Inherit' },
     { field: 'PromptFilename', type: 'str', default: '' },
     { field: 'PromptSet', type: 'str', default: '' },
     { field: 'ForwardSmsTo', type: 'str', default: '' },
-    { field: 'BreakRoute.Route.To', type: 'enum', options: ['ProceedWithNoExceptions', 'None', 'VoiceMail', 'Extension', 'Queue', 'RingGroup', 'IVR', 'External'], default: 'ProceedWithNoExceptions' },
-    { field: 'HolidaysRoute.Route.To', type: 'enum', options: ['ProceedWithNoExceptions', 'None', 'VoiceMail', 'Extension', 'Queue', 'RingGroup', 'IVR', 'External'], default: 'ProceedWithNoExceptions' },
-    { field: 'OutOfOfficeRoute.Route.To', type: 'enum', options: ['ProceedWithNoExceptions', 'None', 'VoiceMail', 'Extension', 'Queue', 'RingGroup', 'IVR', 'External'], default: 'ProceedWithNoExceptions' },
+    { field: 'BreakRoute.Route.To', type: 'enum', options: TCX_ENUMS.DestinationTo, default: 'ProceedWithNoExceptions' },
+    { field: 'HolidaysRoute.Route.To', type: 'enum', options: TCX_ENUMS.DestinationTo, default: 'ProceedWithNoExceptions' },
+    { field: 'OutOfOfficeRoute.Route.To', type: 'enum', options: TCX_ENUMS.DestinationTo, default: 'ProceedWithNoExceptions' },
   ],
   groups: [
     { field: 'AllowCallService', type: 'bool', default: true },
@@ -215,78 +265,65 @@ export const TCX_EXTRA_CATALOGS: Record<string, CatalogField[]> = {
     { field: 'GloballyVisible', type: 'bool', default: false },
     { field: 'OverrideHolidays', type: 'bool', default: false },
     { field: 'DisableCustomPrompt', type: 'bool', default: true },
-    { field: 'TranscriptionMode', type: 'enum', options: ['Inherit', 'Nothing', 'ExternalCallsOnly', 'AllCalls'], default: 'Nothing' },
+    { field: 'TranscriptionMode', type: 'enum', options: TCX_ENUMS.TranscriptionMode, default: 'Nothing' },
     { field: 'CallUsEnableChat', type: 'bool', default: false },
     { field: 'CallUsEnablePhone', type: 'bool', default: false },
     { field: 'CallUsEnableVideo', type: 'bool', default: false },
-    { field: 'CallUsRequirement', type: 'enum', options: ['Both', 'Chat', 'Phone'], default: 'Both' },
-    { field: 'Hours.Type', type: 'enum', options: ['OfficeHours', 'OutsideOfficeHours', 'SpecificHoursExcludingHolidays', 'AnyTime'], default: 'SpecificHoursExcludingHolidays' },
+    { field: 'CallUsRequirement', type: 'enum', options: TCX_ENUMS.CallUsRequirement, default: 'Both' },
+    { field: 'Hours.Type', type: 'enum', options: TCX_ENUMS.ScheduleType, default: 'SpecificHoursExcludingHolidays' },
     { field: 'Hours.IgnoreHolidays', type: 'bool', default: false },
-    { field: 'BreakTime.Type', type: 'enum', options: ['OfficeHours', 'OutsideOfficeHours', 'SpecificHoursExcludingHolidays', 'AnyTime'], default: 'SpecificHoursExcludingHolidays' },
+    { field: 'BreakTime.Type', type: 'enum', options: TCX_ENUMS.ScheduleType, default: 'SpecificHoursExcludingHolidays' },
     { field: 'BreakTime.IgnoreHolidays', type: 'bool', default: false },
-    { field: 'OfficeRoute.Route.To', type: 'enum', options: ['None', 'VoiceMail', 'Extension', 'Queue', 'RingGroup', 'IVR', 'External'], default: 'None' },
-    { field: 'BreakRoute.Route.To', type: 'enum', options: ['None', 'VoiceMail', 'Extension', 'Queue', 'RingGroup', 'IVR', 'External'], default: 'None' },
-    { field: 'HolidaysRoute.Route.To', type: 'enum', options: ['None', 'VoiceMail', 'Extension', 'Queue', 'RingGroup', 'IVR', 'External'], default: 'None' },
-    { field: 'OutOfOfficeRoute.Route.To', type: 'enum', options: ['None', 'VoiceMail', 'Extension', 'Queue', 'RingGroup', 'IVR', 'External'], default: 'None' },
+    { field: 'OfficeRoute.Route.To', type: 'enum', options: TCX_ENUMS.DestinationTo, default: 'None' },
+    { field: 'BreakRoute.Route.To', type: 'enum', options: TCX_ENUMS.DestinationTo, default: 'None' },
+    { field: 'HolidaysRoute.Route.To', type: 'enum', options: TCX_ENUMS.DestinationTo, default: 'None' },
+    { field: 'OutOfOfficeRoute.Route.To', type: 'enum', options: TCX_ENUMS.DestinationTo, default: 'None' },
   ],
   parameters: [],
-  voicemailsettings: [
-    { field: 'VMEmailOptions', type: 'enum', options: ['AttachmentAndDelete', 'Attachment', 'Notification', 'None'], default: 'Notification' },
-    { field: 'VMPlayCallerID', type: 'bool', default: false },
-    { field: 'VMPlayMsgDateTime', type: 'enum', options: ['None', 'Date', 'Time', 'DateTime'], default: 'None' },
-    { field: 'VMDisablePinAuth', type: 'bool', default: false },
-    { field: 'VMEnabled', type: 'bool', default: true },
-  ],
-  mailsettings: [
-    { field: 'SmtpHost', type: 'str', default: '' },
-    { field: 'SmtpPort', type: 'int', default: 587 },
-    { field: 'SmtpTls', type: 'bool', default: true },
-    { field: 'SmtpUsername', type: 'str', default: '' },
-    { field: 'FromAddress', type: 'str', default: '' },
-    { field: 'FromDisplayName', type: 'str', default: '' },
-    { field: 'NoReplyAddress', type: 'str', default: '' },
-  ],
-  notificationsettings: [
-    { field: 'SendEmailOnVoicemail', type: 'bool', default: true },
-    { field: 'SendEmailOnMissedCall', type: 'bool', default: false },
-    { field: 'SendEmailOnFax', type: 'bool', default: true },
-    { field: 'LowDiskSpacePercent', type: 'int', default: 10 },
-    { field: 'MaxEmailCount', type: 'int', default: 0 },
-  ],
+  // Emptied: these VM* fields live on Pbx.User, not Pbx.VoicemailSettings, whose
+  // real schema is Quota / MinDuration / AutoDelete* / Transcribe*.
+  voicemailsettings: [],
+  // Emptied: Pbx.MailSettings has no Smtp* fields at all — not even a port. The
+  // real schema is MailServerType / MailServer / MailSslEnabled / MailUser /
+  // MailAddress / MailPassword.
+  mailsettings: [],
+  // Emptied: the previous five fields did not exist on Pbx.NotificationSettings.
+  // The real schema is EmailAddresses / NotifyCodes / Setpoints[] — verify any
+  // replacement against GET /xapi/v1/$metadata before adding it back.
+  notificationsettings: [],
+  // Verified against $metadata: these are the complete Pbx.AntiHackingSettings
+  // fields. SecurityDefenseProgram is the admin console's "Automatic Global IP
+  // Blacklist" checkbox. The defaults below are one PBX's observed values, not
+  // documented 3CX defaults — treat them as a starting point, not fleet policy.
   antihackingsettings: [
-    { field: 'PermanentBlacklistAttempts', type: 'int', default: 100 },
-    { field: 'PermanentBlacklistSeconds', type: 'int', default: 3600 },
-    { field: 'TemporaryBlacklistAttempts', type: 'int', default: 5 },
-    { field: 'TemporaryBlacklistSeconds', type: 'int', default: 150 },
-    { field: 'EnableAuthFail', type: 'bool', default: true },
-    { field: 'CheckAnonymousCalls', type: 'bool', default: true },
-    { field: 'BlockAnonymousCalls', type: 'bool', default: false },
+    { field: 'SecurityDefenseProgram', type: 'bool', default: true },
+    { field: 'HackAuthRequests', type: 'int', default: 5 },
+    { field: 'HackChallengeRequests', type: 'int', default: 1000 },
+    { field: 'HackBlacklistDuration', type: 'int', default: 86400 },
+    { field: 'HackBarrierGreen', type: 'int', default: 200 },
+    { field: 'HackBarrierAmber', type: 'int', default: 2000 },
+    { field: 'HackBarrierRed', type: 'int', default: 4000 },
+    { field: 'MaxRequestPerPeriod', type: 'int', default: 20 },
+    { field: 'ThrottlePeriodLength', type: 'int', default: 2 },
   ],
   countrycodes: [],
   codecssettings: [],
-  remotearchivingsettings: [
-    { field: 'Enabled', type: 'bool', default: false },
-    { field: 'ArchivingType', type: 'enum', options: ['FTP', 'S3', 'Azure', 'SFTP'], default: 'FTP' },
-    { field: 'Host', type: 'str', default: '' },
-    { field: 'Port', type: 'int', default: 21 },
-    { field: 'RemotePath', type: 'str', default: '' },
-    { field: 'Username', type: 'str', default: '' },
-  ],
+  // Emptied: Pbx.RemoteArchivingSettings is shaped as Location.* plus a
+  // per-subsystem Backups/Recordings/Voicemails/Faxes/Chats block — nothing
+  // resembling a flat Host/Port/Username.
+  remotearchivingsettings: [],
   officehours: [],
-  generalsettingsforpbx: [
-    { field: 'CallHistoryEnabled', type: 'bool', default: true },
-    { field: 'HideCallHistoryForUsers', type: 'bool', default: false },
-    { field: 'CallRecordingEnabled', type: 'bool', default: false },
-  ],
-  secureSipsettings: [
-    { field: 'TlsEnabled', type: 'bool', default: true },
-    { field: 'SrtpEnabled', type: 'bool', default: false },
-  ],
+  // Emptied: none of the Call*/Hide* fields exist. The real schema is
+  // OperatorExtension / AllowFwdToExternal / PlayBusy / BusyMonitor* / HDAutoLogout*.
+  generalsettingsforpbx: [],
+  // Emptied: Pbx.SecureSipSettings holds only PrivateKey.* and Certificate.* —
+  // there is no TLS/SRTP on/off switch here.
+  secureSipsettings: [],
   sbcs: [
     { field: 'AudioPort', type: 'int', default: 20000 },
-    { field: 'LogLevel', type: 'enum', options: ['Low', 'Medium', 'High', 'Verbose'], default: 'Low' },
+    { field: 'LogLevel', type: 'enum', options: TCX_ENUMS.SbcLogLevel, default: 'Low' },
     { field: 'LogSize', type: 'int', default: 100 },
-    { field: 'Security', type: 'enum', options: ['TLS', 'TCP', 'UDP'], default: 'TLS' },
+    { field: 'Security', type: 'enum', options: TCX_ENUMS.SbcSecurity, default: 'TLS' },
     { field: 'PassiveServerIsEnabled', type: 'bool', default: false },
     { field: 'PassiveServer', type: 'str', default: '' },
     { field: 'Group', type: 'str', default: '' },

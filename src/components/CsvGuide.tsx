@@ -43,7 +43,9 @@ Edge-02,root,s3cret,ssh://root@10.0.0.6,`}</pre>
                 .
               </p>
               
-              <h4>Export from KeePass</h4>
+              <h4 className="csvguide__rec">
+                Export from KeePass <span className="csvguide__recbadge">Recommended</span>
+              </h4>
               <ol>
                 <li>Open your KeePass database to export.</li>
                 <li>
@@ -64,7 +66,7 @@ Edge-02,root,s3cret,ssh://root@10.0.0.6,`}</pre>
                 folder. Remember the password!
               </p>
               
-              <h4>Maing your own CSV</h4>
+              <h4>Making your own CSV</h4>
               <p>
                 Use these KeePass-style headers ideally (or change them in the <i>Column mapping &amp; options</i>):
               </p>

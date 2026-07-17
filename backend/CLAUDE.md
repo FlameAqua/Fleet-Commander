@@ -381,19 +381,26 @@ processes it.
 
 ### 5.9 Golden Standard preset
 
-`GOLDEN_STANDARD_PRESET` (in `index.html`) — the four entities that are
-**system-wide policy** and never change between fresh phone systems:
+`GOLDEN_STANDARD_PRESET` (in `src/features/threecx/catalogs.ts`) — the
+entities that are **system-wide policy** and never change between fresh
+phone systems:
 
 - `outboundrules` — emergency / national / international dial plan
 - `notificationsettings` — alert recipients & thresholds (singleton)
-- `blocklist` — IP blocklist/whitelist baseline
 - `parameters` — narrowed by filter to just `NOTALLOWED_COUNTRYCODES,
   MS_LOCAL_CODEC_LIST, MS_EXTERNAL_CODEC_LIST` (defined in
   `GOLDEN_PARAMETERS_FILTER`)
 
+`blocklist` was **deliberately removed** from this set and this section used
+to wrongly list it as a fourth entry. Per-PBX blocklists drift fast — each
+system accumulates its own attacker IPs — so cloning a baseline over them on
+every migration threw away site-specific learning. Add it by hand via
+Advanced if a particular run needs it. (Rationale preserved in the comment
+above the legacy `GOLDEN_STANDARD_PRESET` in `templates/index.html`.)
+
 Clicking the **★ Load Golden Standard preset** button **wipes all current
-panels** (including Trunks and Users) and adds only these four. Trunks
-and Users are deliberately NOT in the preset — they're per-system.
+panels** (including Trunks and Users) and adds only these. Trunks and
+Users are deliberately NOT in the preset — they're per-system.
 
 ---
 
@@ -677,8 +684,20 @@ Reserves the right edge so the filter input stops short of the button.
   vary per-PBX, extend `_remap_trunk_refs` (the pattern is identical).
 - **No transaction / rollback on import.** A partial import leaves the
   target in a mixed state. Use Audit first to see what would change.
-- **Singleton field catalogs are best-effort guesses.** They're based on
-  probable field names; for the actual schema, probe a real PBX.
+- **Singleton field catalogs were guesses; most are now empty.** Probed
+  2026-07-17 against a live V20 PBX via `GET /xapi/v1/$metadata` (the OData
+  schema — authoritative, unlike sampling live data). Every guessed singleton
+  field turned out not to exist, so `voicemailsettings`, `mailsettings`,
+  `notificationsettings`, `remotearchivingsettings`, `generalsettingsforpbx`
+  and `secureSipsettings` are now `[]` — operators add fields by hand, same as
+  `parameters` / `officehours` already did. `antihackingsettings` is the one
+  populated singleton, verified field-by-field. Re-derive any of them with
+  `backend/scripts/probe-xapi-metadata.sh`; never hand-write a field list.
+- **Enum options live in `TCX_ENUMS`, not inline.** They were previously
+  written out per entity and had drifted into five subtly different wrong
+  copies of `TranscriptionMode`. Members are transcribed from `$metadata`.
+  Collection-entity *field names* were always correct — only the singletons
+  and the enums were fabricated.
 - **The Golden Standard preset is hardcoded.** If teams want different
   presets, generalize `GOLDEN_STANDARD_PRESET` into a dropdown.
 

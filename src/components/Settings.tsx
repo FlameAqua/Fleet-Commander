@@ -14,6 +14,8 @@ import {
 } from '../api'
 import { APP_VERSION, GITHUB_URL } from '../releaseNotes'
 import { openExternal } from '../lib/external'
+import { RESERVED_CODES, type ExitCategory } from '../features/run/exitCategories'
+import { resetTips, useToast } from './ToastProvider'
 import './settings.css'
 
 export interface AnimPrefs {
@@ -80,9 +82,22 @@ interface Props {
   onFxChange: (fx: FxLevels) => void
   shipFreq: number
   onShipFreqChange: (n: number) => void
+  exitCategories: ExitCategory[]
+  onExitCategoriesChange: (c: ExitCategory[]) => void
 }
 
-export function Settings({ open, onClose, anim, onAnimChange, fx, onFxChange, shipFreq, onShipFreqChange }: Props) {
+export function Settings({
+  open,
+  onClose,
+  anim,
+  onAnimChange,
+  fx,
+  onFxChange,
+  shipFreq,
+  onShipFreqChange,
+  exitCategories,
+  onExitCategoriesChange,
+}: Props) {
   const [settings, setSettings] = useState<AppSettings | null>(null)
   const [folderErr, setFolderErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -90,6 +105,7 @@ export function Settings({ open, onClose, anim, onAnimChange, fx, onFxChange, sh
   const [shipErr, setShipErr] = useState<string | null>(null)
   const shipInput = useRef<HTMLInputElement>(null)
   const [upd, setUpd] = useState<UpdateStatus | null>(null)
+  const toast = useToast()
   // Tracks rapid back-and-forth slider wiggles for the Black Pearl easter egg.
   const wiggle = useRef({ last: shipFreq, dir: 0, count: 0, t: 0 })
 
@@ -290,6 +306,38 @@ export function Settings({ open, onClose, anim, onAnimChange, fx, onFxChange, sh
         </section>
 
         <section className="settings__section">
+          <h4>Result categories</h4>
+          <p className="settings__hint">
+            Labels for exit codes in the Voyage Results. <code>0</code> (Success), <code>1</code> (Error) and{' '}
+            <code>2</code> (Failure) are fixed; give <code>3</code>–<code>9</code> your own labels. A blank code just
+            counts as an Error.
+          </p>
+          <div className="settings__cats">
+            {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((code) => {
+              const reserved = RESERVED_CODES.includes(code)
+              const reservedLabel = code === 0 ? 'Success' : code === 1 ? 'Error' : 'Failure'
+              const label = reserved ? reservedLabel : exitCategories.find((c) => c.code === code)?.label ?? ''
+              return (
+                <div key={code} className="settings__catrow">
+                  <code className="settings__catcode">exit {code}</code>
+                  <input
+                    type="text"
+                    className="settings__catname"
+                    value={label}
+                    disabled={reserved}
+                    placeholder="custom label…"
+                    onChange={(e) => {
+                      const rest = exitCategories.filter((c) => c.code !== code)
+                      onExitCategoriesChange(e.target.value.trim() ? [...rest, { code, label: e.target.value }] : rest)
+                    }}
+                  />
+                </div>
+              )
+            })}
+          </div>
+        </section>
+
+        <section className="settings__section">
           <h4>Ship art</h4>
           <p className="settings__hint">
             Drop clip-art into the ships folder (PNG/JPG/GIF/SVG/WEBP, max 3&nbsp;MB each) and one
@@ -345,6 +393,23 @@ export function Settings({ open, onClose, anim, onAnimChange, fx, onFxChange, sh
             </ul>
           )}
           {shipErr && <div className="settings__err">{shipErr}</div>}
+        </section>
+
+        <section className="settings__section">
+          <h4>Tips</h4>
+          <p className="settings__hint">
+            One-off hints appear the first time you use a feature. Reset them to see the tips again.
+          </p>
+          <button
+            type="button"
+            className="settings__btn"
+            onClick={() => {
+              resetTips()
+              toast('Tips reset — they’ll show again as you use the app.', 'ok')
+            }}
+          >
+            Reset tips
+          </button>
         </section>
 
         {window.electron?.onUpdateStatus && (

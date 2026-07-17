@@ -94,7 +94,8 @@
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
-      "shortcutName": "Fleet Commander"
+      "shortcutName": "Fleet Commander",
+      "include": "build/installer.nsh"
     },
     "linux": {
       "target": [

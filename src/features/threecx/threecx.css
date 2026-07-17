@@ -87,6 +87,18 @@
   color: var(--muted);
 }
 
+/* One-line explainer under the operation tabs. Modify emphasises its copy
+   (<strong>) because that mode writes to every selected system. */
+.tcx__desc {
+  margin: 0;
+  font-size: 0.83rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.tcx__desc strong {
+  color: var(--text);
+}
+
 /* Advanced Settings modal */
 .tcx-modal__overlay {
   position: fixed;
@@ -227,12 +239,15 @@
   background: var(--bg);
   color: var(--text);
 }
+/* Portaled to <body>: fixed coords come from the input's rect (inline style).
+   It cannot live inside .tcx-search: the ancestor `.run` has overflow:hidden,
+   which CLIPS an absolutely-positioned list at the card edge — no z-index can
+   escape a clip, which is why the old `z-index: 50` here looked like a layering
+   bug but wasn't. (.step is also a stacking context via backdrop-filter, so a
+   raised z-index would have been trapped there too.) */
 .tcx-search__list {
-  position: absolute;
-  z-index: 50;
-  top: calc(100% + 2px);
-  left: 0;
-  right: 0;
+  position: fixed;
+  z-index: 1450;
   max-height: 280px;
   overflow-y: auto;
   list-style: none;

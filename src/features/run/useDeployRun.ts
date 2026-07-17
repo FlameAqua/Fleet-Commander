@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import { runDeploy, type DeployEvent, type MetaEvent, type SummaryEvent } from '../../lib/stream'
 import { EXPORT_BEGIN, EXPORT_END, extractExport, type ExportData } from '../threecx/exportChip'
 
-export type CardStatus = 'queued' | 'running' | 'ok' | 'fail'
+export type CardStatus = 'queued' | 'running' | 'ok' | 'fail' | 'skipped'
 
 export interface HostCard {
   label: string
@@ -50,6 +50,8 @@ export function useDeployRun(): DeployRun {
   const pendingRef = useRef<Map<string, string[]>>(new Map())
   const rafRef = useRef<number | null>(null)
   const abortRef = useRef<AbortController | null>(null)
+  // Set when the operator hits Stop, so unfinished hosts become "skipped".
+  const cancelledRef = useRef(false)
   // Hosts whose live log is currently inside a 3CX export base64 block.
   const suppressRef = useRef<Set<string>>(new Set())
 
@@ -155,6 +157,7 @@ export function useDeployRun(): DeployRun {
       setOrder([])
     }
     setStatus('running')
+    cancelledRef.current = false
 
     const ctrl = new AbortController()
     abortRef.current = ctrl
@@ -165,11 +168,26 @@ export function useDeployRun(): DeployRun {
     } finally {
       flushPending()
       abortRef.current = null
+      // A stopped run: any host that never returned a result is "skipped".
+      if (cancelledRef.current) {
+        setCardMap((prev) => {
+          const next = { ...prev }
+          for (const label of Object.keys(next)) {
+            const c = next[label]
+            if (c.status === 'queued' || c.status === 'running') {
+              next[label] = { ...c, status: 'skipped', stage: c.stage ?? 'stopped', message: c.message ?? 'stopped before completion' }
+            }
+          }
+          return next
+        })
+        cancelledRef.current = false
+      }
       setStatus('done')
     }
   }
 
   function cancel() {
+    cancelledRef.current = true
     abortRef.current?.abort()
   }
 

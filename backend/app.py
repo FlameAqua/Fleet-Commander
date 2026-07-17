@@ -1267,8 +1267,8 @@ def auth_check():
         event_q = _queue_mod.Queue()
 
         def _run(t):
-            ok, err = deployer.check_auth(t, creds.get(t.label, ""), cfg)
-            event_q.put({"type": "result", "label": t.label, "ok": ok, "error": err})
+            ok, err, os_family = deployer.check_auth(t, creds.get(t.label, ""), cfg)
+            event_q.put({"type": "result", "label": t.label, "ok": ok, "error": err, "os": os_family})
 
         passed = 0
         done = 0
@@ -1500,6 +1500,19 @@ def deploy():
                     continue
                 slot = host_vars_by_label.setdefault(_t.label, {})
                 slot.setdefault("Password", pw)
+
+    # Test Host and Manual modes have no Compound CSV, so a custom script using
+    # $Password would expand to an empty string and fail. Mirror the SSH
+    # credential each host connects with into host_vars[label][Password] — the
+    # same trick the 3CX "ssh" password source uses above — so $Password means
+    # the same thing in every source mode. Compound CSV already carries its own
+    # Password column, so setdefault leaves the operator's value untouched.
+    if action == "custom_script":
+        for _t in targets:
+            pw = creds.get(_t.label, "")
+            if not pw:
+                continue
+            host_vars_by_label.setdefault(_t.label, {}).setdefault("Password", pw)
 
     # ---- Per-host root password (custom_script only) ---------------------- #
     # Two sources, mutually exclusive:

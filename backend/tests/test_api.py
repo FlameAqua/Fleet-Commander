@@ -10,6 +10,7 @@ Run:  node tools/run-tests.mjs      (locates the venv python, then runs this)
   or: backend/.venv/Scripts/python.exe backend/tests/test_api.py
 """
 
+import io
 import json
 import os
 import sys
@@ -172,6 +173,116 @@ def test_exec_timeout_bounds():
           f"_EXEC_NO_TIMEOUT ({v}) is positive and under threading.TIMEOUT_MAX ({threading.TIMEOUT_MAX})")
 
 
+def _capture_deploy_host(monkey_target=deployer):
+    """Stub deployer.deploy_host, recording the kwargs each host was run with."""
+    calls = []
+    real = monkey_target.deploy_host
+
+    def fake(target, password, script, cfg, **kw):
+        calls.append({"target": target, "password": password, "script": script, **kw})
+        return deployer.HostResult(
+            target=target.label, ok=True, stage="done", message="stubbed",
+            exit_status=0, output="", duration_s=0.0,
+        )
+
+    monkey_target.deploy_host = fake
+    return calls, (lambda: setattr(monkey_target, "deploy_host", real))
+
+
+def test_password_var_for_test_and_manual():
+    print("\n[$Password exposed for Test Host / Manual]")
+    c = flask_app.app.test_client()
+    calls, restore = _capture_deploy_host()
+    try:
+        # --- Test Host: password is typed by the operator, no CSV exists.
+        r = c.post("/api/deploy", data={
+            "mode": "test",
+            "action": "custom_script",
+            "test_password": "hunter2",
+            "custom_script": (io.BytesIO(b'echo "$Password"\n'), "s.sh"),
+        })
+        r.data  # drain the stream so the generator runs
+        check(len(calls) == 1, "test mode ran one host")
+        hv = calls[0].get("host_vars") or {}
+        check(hv.get("Password") == "hunter2",
+              f"test host gets $Password from the typed password (got {hv.get('Password')!r})")
+
+        # The prelude is what actually makes $Password resolve in the script.
+        prelude = deployer._build_host_vars_prelude(hv)
+        check("export Password='hunter2'" in prelude, "prelude exports Password")
+
+        # --- Manual rows: password comes from the typed-in row.
+        calls.clear()
+        r = c.post("/api/deploy", data={
+            "mode": "universal",
+            "action": "custom_script",
+            "ssh_csv": (io.BytesIO(b"url\nssh://root@10.0.0.9\n"), "u.csv"),
+            "pass_csv": (io.BytesIO(b"host,password\n10.0.0.9,manualpw\n"), "p.csv"),
+            "custom_script": (io.BytesIO(b'echo "$Password"\n'), "s.sh"),
+        })
+        r.data
+        check(len(calls) == 1, "manual mode ran one host")
+        check((calls[0].get("host_vars") or {}).get("Password") == "manualpw",
+              "manual host gets $Password from its row")
+    finally:
+        restore()
+
+
+def test_password_var_compound_not_clobbered():
+    print("\n[compound CSV keeps its own Password column]")
+    c = flask_app.app.test_client()
+    calls, restore = _capture_deploy_host()
+    try:
+        # host_vars from the browser already carries Password; the SSH cred
+        # differs. The operator's value must win (setdefault, not overwrite).
+        kp = b"Account,Login Name,Password,Web Site,Comments\nBox,root,sshpw,ssh://root@10.0.0.7,\n"
+        r = c.post("/api/deploy", data={
+            "mode": "universal",
+            "action": "custom_script",
+            "keepass_csv": (io.BytesIO(kp), "fleet.csv"),
+            "host_vars": json.dumps({"ssh://root@10.0.0.7:22": {"Password": "csvpw", "Site": "ALPHA"}}),
+            "custom_script": (io.BytesIO(b'echo "$Password"\n'), "s.sh"),
+        })
+        r.data
+        check(len(calls) == 1, "compound mode ran one host")
+        hv = calls[0].get("host_vars") or {}
+        check(hv.get("Password") == "csvpw", f"CSV's Password column preserved (got {hv.get('Password')!r})")
+        check(hv.get("Site") == "ALPHA", "other CSV columns still exposed")
+    finally:
+        restore()
+
+
+def test_root_password_column_still_stripped():
+    print("\n[root-password column never reaches the script env]")
+    c = flask_app.app.test_client()
+    calls, restore = _capture_deploy_host()
+    try:
+        kp = b"Account,Login Name,Password,Web Site,Comments\nBox,root,sshpw,ssh://root@10.0.0.8,\n"
+        r = c.post("/api/deploy", data={
+            "mode": "universal",
+            "action": "custom_script",
+            "keepass_csv": (io.BytesIO(kp), "fleet.csv"),
+            "host_vars": json.dumps({"ssh://root@10.0.0.8:22": {"RootPassword": "rootpw"}}),
+            "root_password_column": "RootPassword",
+            "custom_script": (io.BytesIO(b"id -u\n"), "s.sh"),
+        })
+        r.data
+        check(len(calls) == 1, "ran one host")
+        hv = calls[0].get("host_vars") or {}
+        check("RootPassword" not in hv, "root-password column popped out of host_vars")
+        check(calls[0].get("root_password") == "rootpw", "root password routed to su escalation")
+    finally:
+        restore()
+
+
+def test_classify_os():
+    print("\n[OS classification for mixed-fleet check]")
+    check(deployer._classify_os("Linux\n") == "linux", "Linux -> linux")
+    check(deployer._classify_os("OpenBSD\n") == "openbsd", "OpenBSD -> openbsd")
+    check(deployer._classify_os("Darwin") == "", "unknown OS -> ''")
+    check(deployer._classify_os("") == "", "empty -> ''")
+
+
 def main():
     for fn in (
         test_script_categories,
@@ -181,6 +292,10 @@ def main():
         test_delete_csv_guards,
         test_known_hosts_scrub,
         test_exec_timeout_bounds,
+        test_password_var_for_test_and_manual,
+        test_password_var_compound_not_clobbered,
+        test_root_password_column_still_stripped,
+        test_classify_os,
     ):
         fn()
     print(f"\n{_count - len(_failures)}/{_count} checks passed.")
