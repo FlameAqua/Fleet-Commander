@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  ApiError,
+  errMsg,
   deleteShip,
   getSettings,
   listShips,
@@ -24,6 +24,12 @@ export interface AnimPrefs {
   clouds: boolean
   waves: boolean
   panel: boolean
+  /**
+   * Animate even when the OS asks apps to reduce motion. Off by default (that
+   * request is an accessibility setting), but Windows also sets it for RDP
+   * sessions, where the operator usually does want the effects.
+   */
+  forceMotion: boolean
 }
 
 export const DEFAULT_ANIM: AnimPrefs = {
@@ -32,6 +38,7 @@ export const DEFAULT_ANIM: AnimPrefs = {
   clouds: true,
   waves: true,
   panel: true,
+  forceMotion: false,
 }
 
 /** Intensity/density levels (1–10) for the animated effects. */
@@ -50,10 +57,6 @@ const ANIM_ROWS: { key: keyof AnimPrefs; label: string; tag?: string }[] = [
   { key: 'waves', label: 'Waves & ships' },
   { key: 'panel', label: 'Panel transitions' },
 ]
-
-function errMsg(e: unknown): string {
-  return e instanceof ApiError ? e.message : e instanceof Error ? e.message : String(e)
-}
 
 function updateText(s: UpdateStatus | null): string {
   if (!s) return 'Click to check for a new version.'
@@ -100,6 +103,10 @@ export function Settings({
 }: Props) {
   const [settings, setSettings] = useState<AppSettings | null>(null)
   const [folderErr, setFolderErr] = useState<string | null>(null)
+  const [testHostDraft, setTestHostDraft] = useState('')
+  // Windows sets this for RDP sessions; the extra toggle only makes sense then.
+  const [systemReducesMotion, setSystemReducesMotion] = useState(false)
+  const [testHostErr, setTestHostErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [ships, setShips] = useState<string[]>([])
   const [shipErr, setShipErr] = useState<string | null>(null)
@@ -115,10 +122,21 @@ export function Settings({
   }, [open])
 
   useEffect(() => {
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)')
+    const sync = () => setSystemReducesMotion(mq.matches)
+    sync()
+    mq.addEventListener('change', sync)
+    return () => mq.removeEventListener('change', sync)
+  }, [])
+
+  useEffect(() => {
     if (!open) return
     const load = () => {
       getSettings()
-        .then(setSettings)
+        .then((s) => {
+          setSettings(s)
+          setTestHostDraft(s.test_host)
+        })
         .catch(() => setSettings(null))
       listShips()
         .then((r) => setShips(r.ships))
@@ -179,6 +197,23 @@ export function Settings({
     }
   }
 
+  /** Persist the sandbox target. Empty input clears it; Reset restores the built-in. */
+  async function saveTestHost(value: string | null) {
+    setTestHostErr(null)
+    setBusy(true)
+    try {
+      const next = await saveSettings({ test_host: value })
+      setSettings(next)
+      setTestHostDraft(next.test_host)
+      // The Source panel reads this from /api/config on mount.
+      window.dispatchEvent(new Event('fc:test-host-changed'))
+    } catch (e) {
+      setTestHostErr(errMsg(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function resetFolder(which: 'csv' | 'scripts') {
     setFolderErr(null)
     setBusy(true)
@@ -229,6 +264,23 @@ export function Settings({
           <p className="settings__hint">
             Turn these off if the background renders poorly (e.g. over RDP).
           </p>
+          {systemReducesMotion && (
+            <label className="settings__toggle">
+              <input
+                type="checkbox"
+                checked={anim.forceMotion}
+                onChange={(e) => setAnim('forceMotion', e.target.checked)}
+              />
+              <span>
+                Animate anyway
+                <em className="settings__tag">system asks to reduce motion</em>
+                <small className="settings__sub">
+                  Windows turns this on for RDP sessions, which leaves the background
+                  effects frozen in place. Tick to run them regardless.
+                </small>
+              </span>
+            </label>
+          )}
           {ANIM_ROWS.map((r) => (
             <label key={r.key} className="settings__toggle">
               <input
@@ -303,6 +355,47 @@ export function Settings({
             busy={busy}
           />
           {folderErr && <div className="settings__err">{folderErr}</div>}
+        </section>
+
+        <section className="settings__section">
+          <h4>Sandbox target</h4>
+          <p className="settings__hint">
+            A safe host to try an action on before running it against the fleet. It appears as
+            “+ Test host” in <strong>Input Manually</strong>. Leave blank to hide that button.
+          </p>
+          <div className="settings__testhost">
+            <input
+              type="text"
+              spellCheck={false}
+              placeholder={settings?.default_test_host ?? 'ssh://root@host.example'}
+              value={testHostDraft}
+              disabled={busy}
+              onChange={(e) => setTestHostDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') void saveTestHost(testHostDraft.trim())
+              }}
+            />
+            <button
+              type="button"
+              className="settings__btn"
+              disabled={busy || testHostDraft === (settings?.test_host ?? '')}
+              onClick={() => void saveTestHost(testHostDraft.trim())}
+            >
+              Save
+            </button>
+            {settings?.test_host_custom && (
+              <button
+                type="button"
+                className="settings__btn"
+                disabled={busy}
+                title={`Restore the built-in default (${settings.default_test_host})`}
+                onClick={() => void saveTestHost(null)}
+              >
+                Reset
+              </button>
+            )}
+          </div>
+          {testHostErr && <div className="settings__err">{testHostErr}</div>}
         </section>
 
         <section className="settings__section">

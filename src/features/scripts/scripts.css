@@ -193,10 +193,14 @@
   display: flex;
   flex-direction: column;
 }
-.scripts__editor .se .se__ta {
+.scripts__editor .se .se__cm {
   flex: 1;
   min-height: 0;
+  max-height: none;
   resize: none;
+}
+.scripts__editor .se .se__cm .cm-editor {
+  min-height: 0;
 }
 .scripts__editor-head {
   display: flex;

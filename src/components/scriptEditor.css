@@ -4,20 +4,29 @@
 .se {
   position: relative;
 }
-.se .se__ta {
-  width: 100%;
+/* CodeMirror host. The editor draws its own chrome (see themeExt in
+   ScriptEditor.tsx); this only sizes it and keeps it resizable like the
+   textarea it replaced. */
+.se .se__cm {
   min-height: 240px;
+  max-height: 60vh;
   resize: vertical;
-  font-family: var(--mono);
-  font-size: 0.85rem;
-  line-height: 1.45;
-  padding: 0.6rem 0.75rem;
-  border: 1px solid var(--border);
+  overflow: auto;
   border-radius: 8px;
-  background: var(--bg);
-  color: var(--text);
-  box-sizing: border-box;
-  tab-size: 2;
+}
+.se .se__cm .cm-editor {
+  height: 100%;
+  min-height: 240px;
+}
+.se .se__cm .cm-scroller {
+  line-height: 1.45;
+  overflow: auto;
+}
+/* The library panel styles bare <button>s; CodeMirror's search panel has some. */
+.se .se__cm .cm-panel button,
+.se .se__cm .cm-panel input {
+  font: inherit;
+  font-size: 0.8rem;
 }
 .se .se__help {
   position: absolute;
@@ -106,35 +115,15 @@
   color: var(--accent);
   font-weight: 600;
 }
-.se .se__menu {
-  position: absolute;
-  z-index: 5;
-  list-style: none;
-  margin: 0;
-  padding: 0.2rem;
-  min-width: 150px;
-  max-height: 220px;
-  overflow-y: auto;
-  background: var(--bg);
+
+/* Shown while the CodeMirror chunk loads (see LazyScriptEditor). */
+.se .se__loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border: 1px solid var(--border);
   border-radius: 8px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
-}
-.se .se__menu li {
-  border: none;
-}
-.se .se__menu button {
-  width: 100%;
-  text-align: left;
-  border: none;
-  background: none;
-  color: inherit;
-  font-family: var(--mono);
-  font-size: 0.82rem;
-  padding: 0.3rem 0.5rem;
-  border-radius: 5px;
-  cursor: pointer;
-}
-.se .se__menu button:hover {
-  background: rgba(142, 162, 255, 0.16);
+  background: var(--code-bg);
+  color: var(--muted);
+  font-size: 0.85rem;
 }

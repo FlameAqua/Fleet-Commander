@@ -38,9 +38,17 @@
     transform: translateX(-30vw) scaleX(-1);
   }
 }
+/* When the system asks for reduced motion (Windows does this for RDP sessions),
+   the drift animation never runs. Park each cloud at its own resting spot —
+   otherwise every cloud freezes at the same transform and they stack into one
+   blob. `data-motion="full"` is the operator's explicit "animate anyway"
+   override from Settings. */
 @media (prefers-reduced-motion: reduce) {
-  .cloud {
+  :root:not([data-motion='full']) .cloud {
     animation: none;
-    transform: translateX(20vw);
+    transform: translateX(var(--cloud-rest-x, 20vw));
+  }
+  :root:not([data-motion='full']) .cloud--rtl {
+    transform: translateX(var(--cloud-rest-x, 20vw)) scaleX(-1);
   }
 }

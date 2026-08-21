@@ -3,21 +3,31 @@ import { createPortal } from 'react-dom'
 import { usePrompt } from '../../components/PromptProvider'
 import { useToast } from '../../components/ToastProvider'
 import {
-  ApiError,
+  errMsg,
   decryptCsv,
   decryptServerCsv,
   deleteCsvFile,
   encryptCsvToFolder,
   getServerCsv,
+  importKdbx,
   listCsvFiles,
   openFolder,
   type CsvFileInfo,
 } from '../../api'
-import { buildCanonicalKeepass, canonicalLabel, normaliseSshTarget, type HostEntry } from '../../lib/csv'
+import {
+  buildCanonicalKeepass,
+  canonicalLabel,
+  displayHost,
+  manualRowsToCanonicalCsv,
+  normaliseSshTarget,
+  parsePastedHosts,
+  type HostEntry,
+} from '../../lib/csv'
 import { downloadBlob, readFileText } from '../../lib/file'
 import {
   type CompoundSource,
   type ManualSource,
+  type PasteSource,
   type SourceMode,
   type SourceState,
 } from './sourceModel'
@@ -26,18 +36,15 @@ import './source.css'
 const MODES: { id: SourceMode; label: string }[] = [
   { id: 'compound', label: 'Import CSV' },
   { id: 'manual', label: 'Input Manually' },
-  { id: 'test', label: 'Test Host' },
+  { id: 'paste', label: 'Paste List' },
 ]
 
 interface Props {
   source: SourceState
   onChange: (next: SourceState) => void
   onModeChange: (mode: SourceMode) => void
+  /** Configured sandbox target, offered as a one-click row in Input Manually. */
   testHost: string | null
-}
-
-function errMsg(err: unknown): string {
-  return err instanceof ApiError ? err.message : err instanceof Error ? err.message : String(err)
 }
 
 type NoticeKind = 'error' | 'ok'
@@ -63,8 +70,10 @@ export function SourcePanel({ source, onChange, onModeChange, testHost }: Props)
 
       <div className="source__body">
         {source.mode === 'compound' && <CompoundEditor source={source} onChange={onChange} />}
-        {source.mode === 'manual' && <ManualEditor source={source} onChange={onChange} />}
-        {source.mode === 'test' && <TestEditor testHost={testHost} />}
+        {source.mode === 'manual' && (
+          <ManualEditor source={source} onChange={onChange} testHost={testHost} />
+        )}
+        {source.mode === 'paste' && <PasteEditor source={source} onChange={onChange} />}
       </div>
     </section>
   )
@@ -213,6 +222,37 @@ function CompoundEditor({
     }
   }
 
+  /**
+   * Import from a KeePass vault. The backend opens it (loopback only) and hands
+   * back the SSH-able entries as a canonical CSV; nothing is written to disk.
+   */
+  async function onKdbx(file: File | null) {
+    notify(null)
+    if (!file) return
+    const pw = await prompt({
+      title: 'Open KeePass vault',
+      message: `Enter the master password for "${file.name}".`,
+      password: true,
+      confirmLabel: 'Open',
+    })
+    if (pw === null) return
+    if (!pw) {
+      notify('Master password is required.')
+      return
+    }
+    try {
+      const r = await importKdbx(file, pw)
+      onChange({ ...source, file: { name: r.filename, text: r.csv, fromEncrypted: true }, excluded: [] })
+      notify(
+        `Imported ${r.usable} host${r.usable === 1 ? '' : 's'} from ${file.name}` +
+          (r.skipped ? ` — ${r.skipped} of ${r.total} entries had no SSH URL and were skipped.` : '.'),
+        'ok',
+      )
+    } catch (e) {
+      notify(errMsg(e))
+    }
+  }
+
   async function removeFile() {
     // Only confirm for plaintext CSVs — an .enc-sourced load has no plaintext
     // passwords sitting around, so clearing it is low-stakes.
@@ -264,6 +304,17 @@ function CompoundEditor({
             onChange={(e) => void onFile(e.target.files?.[0] ?? null)}
           />
           Import your own…
+        </label>
+        <label className="src-filebtn" title="Read hosts straight out of a KeePass vault">
+          <input
+            type="file"
+            accept=".kdbx"
+            onClick={(e) => {
+              ;(e.target as HTMLInputElement).value = ''
+            }}
+            onChange={(e) => void onKdbx(e.target.files?.[0] ?? null)}
+          />
+          🔑 KeePass…
         </label>
         <span className="src-filename">
           {source.file ? source.file.name : 'No file selected'}
@@ -571,16 +622,96 @@ function manualUrlState(url: string): 'empty' | 'valid' | 'invalid' {
 function ManualEditor({
   source,
   onChange,
+  testHost,
 }: {
   source: ManualSource
   onChange: (s: SourceState) => void
+  testHost: string | null
 }) {
+  const prompt = usePrompt()
+  const toast = useToast()
+  const [busy, setBusy] = useState(false)
+
+  /** `manual-fleet-2026-08-20.csv` — sorts sensibly in the CSV folder. */
+  function exportName(ext: string): string {
+    const d = new Date()
+    const p = (n: number) => String(n).padStart(2, '0')
+    return `manual-fleet-${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}.${ext}`
+  }
+
+  /** Plaintext download — passwords in the clear, so confirm first. */
+  async function exportPlain() {
+    let text: string
+    try {
+      text = manualRowsToCanonicalCsv(source.rows)
+    } catch (e) {
+      toast(errMsg(e), 'error')
+      return
+    }
+    const ok = await prompt({
+      title: 'Export as plain CSV?',
+      message:
+        'The file stores every password in cleartext. Prefer "Save encrypted…" unless you need a plain CSV right now.',
+      confirm: true,
+      confirmLabel: 'Download anyway',
+    })
+    if (ok === null) return
+    downloadBlob(new Blob([text], { type: 'text/csv' }), exportName('csv'))
+    toast('Exported. Re-import it from the "Import CSV" tab.', 'ok')
+  }
+
+  /** Encrypt straight into the CSV folder — shows up in the import dropdown. */
+  async function exportEncrypted() {
+    let text: string
+    try {
+      text = manualRowsToCanonicalCsv(source.rows)
+    } catch (e) {
+      toast(errMsg(e), 'error')
+      return
+    }
+    const pw = await prompt({
+      title: 'Save encrypted to CSV folder',
+      message: 'Enter a master password. You will need it to import this fleet again.',
+      password: true,
+      confirmLabel: 'Encrypt & save',
+    })
+    if (pw === null) return
+    if (!pw) {
+      toast('Master password is required to encrypt.', 'error')
+      return
+    }
+    setBusy(true)
+    try {
+      const name = exportName('csv')
+      const { filename } = await encryptCsvToFolder(new File([text], name, { type: 'text/csv' }), pw)
+      toast(`Saved "${filename}" to your CSV folder.`, 'ok')
+    } catch (e) {
+      toast(errMsg(e), 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   function update(i: number, patch: Partial<ManualSource['rows'][number]>) {
     const rows = source.rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r))
     onChange({ ...source, rows })
   }
   function add() {
     onChange({ ...source, rows: [...source.rows, { url: '', user: '', password: '' }] })
+  }
+  /** Drop the configured sandbox target into a row (password still required). */
+  function addTestHost() {
+    if (!testHost) return
+    let user = ''
+    let url = testHost
+    const m = /^ssh:\/\/([^@/]+)@(.+)$/i.exec(testHost)
+    if (m) {
+      user = decodeURIComponent(m[1])
+      url = `ssh://${m[2]}`
+    }
+    // Reuse a blank first row rather than leaving an empty one behind.
+    const rows = source.rows.filter((r) => r.url.trim() || r.user.trim() || r.password)
+    onChange({ ...source, rows: [...rows, { url, user, password: '' }] })
   }
   function remove(i: number) {
     const rows = source.rows.filter((_, idx) => idx !== i)
@@ -627,9 +758,40 @@ function ManualEditor({
           </div>
         )
       })}
-      <button type="button" className="src-addrow" onClick={add}>
-        + Add host
-      </button>
+      <div className="src-manualbar">
+        <button type="button" className="src-addrow" onClick={add}>
+          + Add host
+        </button>
+        {testHost && (
+          <button
+            type="button"
+            className="src-addrow"
+            onClick={addTestHost}
+            title={`Add a row for the sandbox target (${testHost})`}
+          >
+            + Test host
+          </button>
+        )}
+        <span className="src-manualbar__spacer" />
+        <button
+          type="button"
+          className="src-manualbar__export"
+          onClick={() => void exportEncrypted()}
+          disabled={busy}
+          title="Encrypt these hosts into your CSV folder so you can re-import them later"
+        >
+          🔒 Save encrypted…
+        </button>
+        <button
+          type="button"
+          className="src-manualbar__export"
+          onClick={() => void exportPlain()}
+          disabled={busy}
+          title="Download these hosts as a plain CSV (passwords in cleartext)"
+        >
+          Export as CSV
+        </button>
+      </div>
       {invalidCount > 0 && (
         <div className="src-manual-hint">
           ⚠ {invalidCount} {invalidCount === 1 ? 'entry isn’t' : 'entries aren’t'} a valid SSH URL,
@@ -642,13 +804,73 @@ function ManualEditor({
 }
 
 // --------------------------------------------------------------------------
-// Test Host
+// Paste List — bulk entry without a file
 // --------------------------------------------------------------------------
-function TestEditor({ testHost }: { testHost: string | null }) {
+function PasteEditor({
+  source,
+  onChange,
+}: {
+  source: PasteSource
+  onChange: (s: SourceState) => void
+}) {
+  const set = (patch: Partial<PasteSource>) => onChange({ ...source, ...patch })
+  const parsed = useMemo(
+    () => parsePastedHosts(source.text, { user: source.defaultUser, password: source.defaultPassword }),
+    [source.text, source.defaultUser, source.defaultPassword],
+  )
+  const missingPw = parsed.rows.filter((r) => !r.password).length
+
   return (
     <div className="src-pane">
-      <p className="src-hint">Run actions on the test phone system (Debian) only:</p>
-      <code className="src-testhost">{testHost ?? '(loading…)'}</code>
+      <textarea
+        className="src-paste"
+        value={source.text}
+        spellCheck={false}
+        onChange={(e) => set({ text: e.target.value })}
+        placeholder={[
+          'One host per line.',
+          '',
+          'Examples:',
+          '10.0.0.5',
+          'ssh://admin@pbx.example:2222',
+          'pbx2.example,admin,pass123',
+        ].join('\n')}
+      />
+      <p className="src-hint">
+        Fields are separated by a <strong>tab</strong> or a <strong>comma</strong>:{' '}
+        <code>host</code>, <code>host,user</code>, or <code>host,user,password</code>. Blank lines
+        and <code>#</code> comments are ignored.
+      </p>
+      <div className="src-pastedefaults">
+        <label>
+          Default user
+          <input
+            type="text"
+            placeholder="root"
+            value={source.defaultUser}
+            spellCheck={false}
+            onChange={(e) => set({ defaultUser: e.target.value })}
+          />
+        </label>
+        <label>
+          Default password
+          <input
+            type="password"
+            autoComplete="off"
+            placeholder="used for lines without one"
+            value={source.defaultPassword}
+            onChange={(e) => set({ defaultPassword: e.target.value })}
+          />
+        </label>
+      </div>
+      {source.text.trim() && (
+        <div className={`src-pastesummary${parsed.rows.length ? '' : ' is-warn'}`}>
+          {parsed.rows.length} host{parsed.rows.length === 1 ? '' : 's'} recognised
+          {parsed.skipped > 0 && ` · ${parsed.skipped} line${parsed.skipped === 1 ? '' : 's'} skipped`}
+          {parsed.droppedHeader && ' · header row ignored'}
+          {missingPw > 0 && ` · ⚠ ${missingPw} without a password`}
+        </div>
+      )}
     </div>
   )
 }
@@ -720,7 +942,7 @@ function HostChecklist({
       </div>
       <ul className="src-checklist__list">
         {filtered.map((e) => {
-          const host = e.url.replace(/^ssh:\/\/[^@]+@/, '').replace(/:\d+$/, '')
+          const host = displayHost(e.url)
           return (
             <li key={e.label}>
               <label>

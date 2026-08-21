@@ -1,7 +1,7 @@
 import { appendSourceToForm, type SourceState } from '../source/sourceModel'
 
 export type ActionId = 'deploy' | 'apt_upgrade' | 'quick_diag' | 'custom_script' | 'threecx'
-export type RunMode = 'universal' | 'test' | 'fallback'
+export type RunMode = 'universal' | 'fallback'
 
 export interface DeployConfigForm {
   version: string
@@ -31,14 +31,14 @@ export interface BuildArgs {
   runMode: RunMode
   config: DeployConfigForm
   source: SourceState
-  /** Required for runMode==='test'. */
-  testPassword?: string
   /** Host labels to re-run for runMode==='fallback'. */
   fallbackHosts?: string[]
   /** Required when action==='custom_script'. */
   customScript?: CustomScriptArgs
   /** Required when action==='threecx' — the threecx_config object. */
   threecxConfig?: object
+  /** Apply a reboot after the built-in system upgrade. Off unless explicitly selected. */
+  rebootSystems?: boolean
 }
 
 /**
@@ -78,11 +78,11 @@ export function buildDeployForm(args: BuildArgs): FormData {
     fd.append('threecx_config', JSON.stringify(args.threecxConfig))
   }
 
-  appendSourceToForm(fd, source, {
-    action,
-    runMode,
-    testPassword: args.testPassword,
-  })
+  if (action === 'apt_upgrade' && args.rebootSystems) {
+    fd.append('reboot_systems', 'on')
+  }
+
+  appendSourceToForm(fd, source, { action, runMode })
 
   if (runMode === 'fallback' && args.fallbackHosts?.length) {
     fd.append('fallback_hosts', JSON.stringify(args.fallbackHosts))

@@ -1,55 +1,203 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import {
+  autocompletion,
+  closeBrackets,
+  closeBracketsKeymap,
+  completionKeymap,
+  type CompletionContext,
+  type CompletionResult,
+} from '@codemirror/autocomplete'
+import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
+import {
+  HighlightStyle,
+  StreamLanguage,
+  bracketMatching,
+  indentUnit,
+  syntaxHighlighting,
+} from '@codemirror/language'
+import { shell } from '@codemirror/legacy-modes/mode/shell'
+import { tags } from '@lezer/highlight'
+import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search'
+import { Compartment, EditorState } from '@codemirror/state'
+import {
+  EditorView,
+  drawSelection,
+  highlightActiveLine,
+  highlightActiveLineGutter,
+  keymap,
+  lineNumbers,
+  placeholder as cmPlaceholder,
+} from '@codemirror/view'
 import { useToast } from './ToastProvider'
 import './scriptEditor.css'
 
 const VARIABLES_HELP =
   'Use your CSV column titles as per-system variables — type $ to insert one (e.g. $SiteCode). Each host gets that column’s value.'
 
-interface Menu {
-  left: number
-  top: number
-  query: string
-}
-
-// Compute the pixel position of a caret index inside a textarea, using a hidden
-// mirror element that replicates the textarea's text layout.
-function caretXY(ta: HTMLTextAreaElement, index: number): { left: number; top: number } {
-  const div = document.createElement('div')
-  const cs = getComputedStyle(ta)
-  const props = [
-    'boxSizing', 'width', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
-    'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth',
-    'fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'letterSpacing', 'tabSize', 'textTransform',
-  ] as const
-  for (const p of props) div.style[p as never] = cs[p as never]
-  div.style.position = 'absolute'
-  div.style.visibility = 'hidden'
-  div.style.whiteSpace = 'pre-wrap'
-  div.style.wordWrap = 'break-word'
-  div.style.overflowWrap = 'break-word'
-  div.textContent = ta.value.slice(0, index)
-  const span = document.createElement('span')
-  span.textContent = ta.value.slice(index) || '.'
-  div.appendChild(span)
-  document.body.appendChild(div)
-  const left = span.offsetLeft
-  const top = span.offsetTop
-  document.body.removeChild(div)
-  return { left, top }
-}
-
 type Interpreter = 'auto' | 'routeros'
 
 // Placeholder examples per interpreter. When the interpreter picker is shown,
 // switching it swaps these so RouterOS users see MikroTik-style examples.
 const PLACEHOLDERS: Record<Interpreter, string> = {
-  auto: '#!/bin/bash\nset -e\necho "Hello from $(hostname)"',
-  routeros:
-    '# RouterOS — commands run straight on the MikroTik console\n' +
-    '/system resource print\n' +
-    '/system identity print\n' +
+  auto: [
+    '#!/bin/bash',
+    'set -e',
+    'echo "Hello from $(hostname)"',
+    '',
+    '# Type $ for your CSV column names — each host gets its own value,',
+    '#   e.g. echo "$Account is at $Web_Site"',
+    '# Ctrl+F to find & replace.',
+  ].join('\n'),
+  routeros: [
+    '# RouterOS — commands run straight on the MikroTik console',
+    '/system resource print',
+    '/system identity print',
     '/interface print',
+    '',
+    '# Ctrl+F to find & replace.',
+  ].join('\n'),
 }
+
+/**
+ * Colours come from the app's theme variables so the editor follows Day/Night
+ * without a second palette. `.cm-*` classes are CodeMirror's own.
+ */
+const themeExt = EditorView.theme({
+  '&': {
+    fontSize: '0.85rem',
+    backgroundColor: 'var(--code-bg)',
+    color: 'var(--text)',
+    border: '1px solid var(--border)',
+    borderRadius: '8px',
+  },
+  '&.cm-focused': { outline: 'none', borderColor: 'var(--accent)' },
+  '.cm-content': { fontFamily: 'var(--mono)', padding: '0.5rem 0' },
+  '.cm-gutters': {
+    backgroundColor: 'transparent',
+    color: 'var(--muted)',
+    border: 'none',
+    fontFamily: 'var(--mono)',
+  },
+  '.cm-activeLine': { backgroundColor: 'rgba(127, 127, 127, 0.08)' },
+  '.cm-activeLineGutter': { backgroundColor: 'transparent', color: 'var(--text)' },
+  '.cm-selectionBackground, &.cm-focused .cm-selectionBackground, ::selection': {
+    backgroundColor: 'rgba(142, 162, 255, 0.28)',
+  },
+  '.cm-cursor': { borderLeftColor: 'var(--text-h)' },
+  '.cm-placeholder': { color: 'var(--muted)' },
+  '.cm-tooltip': {
+    backgroundColor: 'var(--panel)',
+    border: '1px solid var(--border)',
+    borderRadius: '6px',
+    color: 'var(--text)',
+  },
+  '.cm-tooltip-autocomplete ul li[aria-selected]': {
+    backgroundColor: 'rgba(142, 162, 255, 0.2)',
+    color: 'var(--text-h)',
+  },
+  '.cm-searchMatch': { backgroundColor: 'rgba(224, 176, 79, 0.35)', borderRadius: '2px' },
+  '.cm-searchMatch-selected': { backgroundColor: 'rgba(224, 176, 79, 0.65)' },
+
+  // --- Find & replace panel -------------------------------------------------
+  // CodeMirror ships an unstyled browser-default panel; dress it to match the
+  // app's controls (pill inputs, panel background, accent focus ring).
+  '.cm-panels': {
+    backgroundColor: 'var(--panel)',
+    color: 'var(--text)',
+    border: 'none',
+  },
+  '.cm-panels.cm-panels-top': { borderBottom: '1px solid var(--border)' },
+  // Block flow, not flex: CodeMirror separates the find and replace rows with a
+  // plain <br>, which a flex container would ignore (and a flex item with
+  // basis:100% still shrinks onto the same line). Inline children + the <br>
+  // give the original two-row layout, just restyled.
+  '.cm-panel.cm-search': {
+    position: 'relative',
+    padding: '0.85rem 2.4rem 0.9rem 0.9rem',
+    fontFamily: 'var(--sans)',
+    fontSize: '0.8rem',
+    // Drives the gap between the find and replace rows (block flow, so the
+    // line box is what separates them).
+    lineHeight: '2.9',
+  },
+  '.cm-panel.cm-search .cm-textfield': {
+    font: 'inherit',
+    verticalAlign: 'middle',
+    margin: '0 0.6rem 0 0',
+    padding: '0.4rem 0.65rem',
+    minWidth: '200px',
+    border: '1px solid var(--border)',
+    borderRadius: '6px',
+    backgroundColor: 'var(--bg)',
+    color: 'var(--text)',
+  },
+  '.cm-panel.cm-search .cm-textfield:focus': {
+    outline: 'none',
+    borderColor: 'var(--accent)',
+  },
+  '.cm-panel.cm-search button[name]': {
+    font: 'inherit',
+    verticalAlign: 'middle',
+    margin: '0 0.45rem 0 0',
+    padding: '0.34rem 0.85rem',
+    border: '1px solid var(--border)',
+    borderRadius: '999px',
+    backgroundColor: 'rgba(127, 127, 127, 0.12)',
+    backgroundImage: 'none',
+    color: 'var(--text)',
+    cursor: 'pointer',
+  },
+  '.cm-panel.cm-search button[name]:hover': {
+    borderColor: 'var(--accent)',
+    color: 'var(--text-h)',
+  },
+  '.cm-panel.cm-search label': {
+    verticalAlign: 'middle',
+    margin: '0 0.85rem 0 0.25rem',
+    color: 'var(--muted)',
+    whiteSpace: 'nowrap',
+    cursor: 'pointer',
+  },
+  '.cm-panel.cm-search label input': {
+    verticalAlign: 'middle',
+    margin: '0 0.25rem 0 0',
+    cursor: 'pointer',
+  },
+  // The close [x] sits in the corner by default and overlaps the inputs.
+  '.cm-panel.cm-search button[name="close"]': {
+    position: 'absolute',
+    top: '0.5rem',
+    right: '0.6rem',
+    padding: '0.1rem 0.45rem',
+    border: 'none',
+    borderRadius: '6px',
+    background: 'none',
+    color: 'var(--muted)',
+    fontSize: '1.05rem',
+    lineHeight: 1,
+  },
+  '.cm-panel.cm-search button[name="close"]:hover': {
+    color: 'var(--text-h)',
+    backgroundColor: 'rgba(127, 127, 127, 0.16)',
+  },
+})
+
+/**
+ * Token colours come from CSS variables (index.css defines a set per theme), so
+ * highlighting stays readable on both the Day and Night backgrounds.
+ */
+const highlightStyle = HighlightStyle.define([
+  { tag: tags.comment, color: 'var(--tok-comment)', fontStyle: 'italic' },
+  { tag: [tags.keyword, tags.controlKeyword, tags.moduleKeyword], color: 'var(--tok-keyword)' },
+  { tag: [tags.string, tags.special(tags.string)], color: 'var(--tok-string)' },
+  { tag: [tags.number, tags.bool, tags.null], color: 'var(--tok-number)' },
+  { tag: [tags.variableName, tags.propertyName], color: 'var(--tok-variable)' },
+  { tag: [tags.atom, tags.definition(tags.variableName)], color: 'var(--tok-variable)' },
+  { tag: [tags.function(tags.variableName), tags.labelName], color: 'var(--tok-function)' },
+  { tag: [tags.operator, tags.punctuation, tags.bracket], color: 'var(--tok-operator)' },
+  { tag: tags.meta, color: 'var(--tok-meta)' },
+  { tag: tags.invalid, color: 'var(--error-text)' },
+])
 
 interface Props {
   value: string
@@ -61,11 +209,15 @@ interface Props {
   /** When provided, a cmd icon (left of the `?`) lets the operator pick the interpreter. */
   interpreter?: Interpreter
   onInterpreterChange?: (i: Interpreter) => void
-  /** Fired when the textarea gains focus (used for a one-off first-use tip). */
+  /** Fired when the editor gains focus (used for a one-off first-use tip). */
   onFocus?: () => void
 }
 
-/** Script textarea with a `$`-triggered variable dropdown and a help hint. */
+/**
+ * Script editor: CodeMirror with shell highlighting, line numbers, undo/redo,
+ * find (Ctrl+F) and a `$`-triggered dropdown of the CSV's per-system variables.
+ * Tab indents rather than moving focus — this is a code field, not a form field.
+ */
 export function ScriptEditor({
   value,
   onChange,
@@ -77,50 +229,112 @@ export function ScriptEditor({
   onFocus,
 }: Props) {
   const toast = useToast()
-  const ref = useRef<HTMLTextAreaElement>(null)
-  const [menu, setMenu] = useState<Menu | null>(null)
+  const host = useRef<HTMLDivElement>(null)
+  const view = useRef<EditorView | null>(null)
   const [interpOpen, setInterpOpen] = useState(false)
 
-  function refreshMenu(ta: HTMLTextAreaElement) {
-    if (!variables.length) {
-      setMenu(null)
-      return
-    }
-    const pos = ta.selectionStart
-    const before = ta.value.slice(0, pos)
-    const m = /\$([A-Za-z0-9_]*)$/.exec(before)
-    if (!m) {
-      setMenu(null)
-      return
-    }
-    const dollarIdx = pos - m[0].length
-    const xy = caretXY(ta, dollarIdx)
-    const lh = parseFloat(getComputedStyle(ta).lineHeight) || 18
-    setMenu({ left: xy.left, top: xy.top - ta.scrollTop + lh + 2, query: m[1].toLowerCase() })
-  }
+  // Read through refs inside CodeMirror callbacks: the view is created once, so
+  // it must never close over a stale render's props.
+  const onChangeRef = useRef(onChange)
+  const onFocusRef = useRef(onFocus)
+  const varsRef = useRef(variables)
+  useEffect(() => {
+    onChangeRef.current = onChange
+    onFocusRef.current = onFocus
+    varsRef.current = variables
+  })
 
-  function insert(name: string) {
-    const ta = ref.current
-    if (!ta) return
-    const pos = ta.selectionStart
-    const before = ta.value.slice(0, pos)
-    const m = /\$([A-Za-z0-9_]*)$/.exec(before)
-    const start = pos - (m ? m[0].length : 0)
-    const next = ta.value.slice(0, start) + '$' + name + ta.value.slice(pos)
-    onChange(next)
-    setMenu(null)
-    requestAnimationFrame(() => {
-      ta.focus()
-      const c = start + name.length + 1
-      ta.setSelectionRange(c, c)
+  // Parts that change with props get their own compartment so they can be
+  // reconfigured without tearing down the editor (and losing undo history).
+  const [langComp] = useState(() => new Compartment())
+  const [phComp] = useState(() => new Compartment())
+
+  const effectivePlaceholder = onInterpreterChange ? PLACEHOLDERS[interpreter] : (placeholder ?? '')
+
+  useEffect(() => {
+    if (!host.current || view.current) return
+
+    /** `$` + partial name → the CSV's column variables. */
+    function completeVariable(ctx: CompletionContext): CompletionResult | null {
+      const before = ctx.matchBefore(/\$[A-Za-z0-9_]*/)
+      if (!before || (before.from === before.to && !ctx.explicit)) return null
+      const names = varsRef.current
+      if (!names.length) return null
+      return {
+        from: before.from,
+        options: names.map((v) => ({ label: '$' + v, type: 'variable' })),
+        validFor: /^\$[A-Za-z0-9_]*$/,
+      }
+    }
+
+    const v = new EditorView({
+      parent: host.current,
+      state: EditorState.create({
+        doc: value,
+        extensions: [
+          lineNumbers(),
+          highlightActiveLineGutter(),
+          highlightActiveLine(),
+          history(),
+          drawSelection(),
+          bracketMatching(),
+          closeBrackets(),
+          search({ top: true }),
+          highlightSelectionMatches(),
+          autocompletion({ override: [completeVariable] }),
+          // Tab indents inside the editor (Escape then Tab still moves focus).
+          keymap.of([
+            ...closeBracketsKeymap,
+            ...defaultKeymap,
+            ...historyKeymap,
+            ...searchKeymap,
+            ...completionKeymap,
+            indentWithTab,
+          ]),
+          indentUnit.of('  '),
+          EditorView.lineWrapping,
+          themeExt,
+          syntaxHighlighting(highlightStyle),
+          langComp.of([]),
+          phComp.of(cmPlaceholder(effectivePlaceholder)),
+          EditorView.updateListener.of((u) => {
+            if (u.docChanged) onChangeRef.current(u.state.doc.toString())
+            if (u.focusChanged && u.view.hasFocus) onFocusRef.current?.()
+          }),
+        ],
+      }),
     })
-  }
+    view.current = v
+    return () => {
+      v.destroy()
+      view.current = null
+    }
+    // Mount once — later prop changes are pushed in through the effects below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
-  const filtered = menu ? variables.filter((v) => v.toLowerCase().includes(menu.query)).slice(0, 10) : []
+  // Controlled value: only write back when the prop genuinely diverges (e.g. a
+  // library script was loaded), otherwise every keystroke would reset the caret.
+  useEffect(() => {
+    const v = view.current
+    if (!v) return
+    const current = v.state.doc.toString()
+    if (current === value) return
+    v.dispatch({ changes: { from: 0, to: current.length, insert: value } })
+  }, [value])
 
-  // When the interpreter picker is present, the interpreter drives the
-  // placeholder (RouterOS shows MikroTik examples); otherwise honour the prop.
-  const effectivePlaceholder = onInterpreterChange ? PLACEHOLDERS[interpreter] : placeholder
+  // RouterOS commands aren't POSIX shell, so don't pretend to highlight them.
+  useEffect(() => {
+    view.current?.dispatch({
+      effects: langComp.reconfigure(
+        interpreter === 'routeros' ? [] : StreamLanguage.define(shell),
+      ),
+    })
+  }, [interpreter, langComp])
+
+  useEffect(() => {
+    view.current?.dispatch({ effects: phComp.reconfigure(cmPlaceholder(effectivePlaceholder)) })
+  }, [effectivePlaceholder, phComp])
 
   return (
     <div className={`se ${className ?? ''}`}>
@@ -175,33 +389,7 @@ export function ScriptEditor({
       >
         ?
       </button>
-      <textarea
-        ref={ref}
-        className="se__ta"
-        value={value}
-        placeholder={effectivePlaceholder}
-        spellCheck={false}
-        onChange={(e) => {
-          onChange(e.target.value)
-          refreshMenu(e.target)
-        }}
-        onKeyUp={(e) => refreshMenu(e.currentTarget)}
-        onClick={(e) => refreshMenu(e.currentTarget)}
-        onScroll={(e) => menu && refreshMenu(e.currentTarget)}
-        onFocus={() => onFocus?.()}
-        onBlur={() => setTimeout(() => setMenu(null), 150)}
-      />
-      {menu && filtered.length > 0 && (
-        <ul className="se__menu" style={{ left: menu.left, top: menu.top }}>
-          {filtered.map((v) => (
-            <li key={v}>
-              <button type="button" onMouseDown={(e) => { e.preventDefault(); insert(v) }}>
-                ${v}
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+      <div className="se__cm" ref={host} />
     </div>
   )
 }

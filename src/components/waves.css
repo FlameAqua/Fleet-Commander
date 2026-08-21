@@ -223,11 +223,11 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .waves__parallax > use {
+  :root:not([data-motion='full']) .waves__parallax > use {
     animation: none;
   }
-  .ship,
-  .ship.is-sailing {
+  :root:not([data-motion='full']) .ship,
+  :root:not([data-motion='full']) .ship.is-sailing {
     animation: none;
     transform: translateX(-40vw); /* parked offscreen — no crossings */
   }

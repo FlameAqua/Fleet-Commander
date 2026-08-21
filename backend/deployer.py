@@ -563,7 +563,7 @@ fi
 # apt update + upgrade — patch the fleet without reboots / service restarts
 # --------------------------------------------------------------------------- #
 
-def build_apt_upgrade_script() -> str:
+def build_apt_upgrade_script(reboot_systems: bool = False) -> str:
     """
     Build a cross-platform package-update script suitable for **live** systems.
 
@@ -743,9 +743,16 @@ elif command -v rcctl >/dev/null 2>&1; then
   fi
 fi
 
+if [ "__REBOOT_SYSTEMS__" = "1" ]; then
+  warn "reboot requested — the SSH connection will close while the system restarts"
+  echo "DEPLOY_RESULT=success"
+  reboot
+  exit 0
+fi
+
 echo "DEPLOY_RESULT=success"
 exit 0
-"""
+""".replace("__REBOOT_SYSTEMS__", "1" if reboot_systems else "0")
 
 
 # --------------------------------------------------------------------------- #
@@ -3298,6 +3305,123 @@ def check_auth(target: Target, password: str, cfg: DeployConfig):
             pass
 
 
+def _upgrade_routeros_host(
+    client,
+    target: Target,
+    password: str,
+    cfg: DeployConfig,
+    success_text: str,
+    *,
+    reboot_systems: bool,
+    log_callback=None,
+    started_at: float,
+) -> HostResult:
+    """Perform RouterOS + RouterBOARD upgrades, reconnecting after package install.
+
+    ``/system package update install`` deliberately drops SSH while RouterOS
+    reboots.  That reboot is intrinsic to installing RouterOS and is therefore
+    independent of the UI's optional final reboot toggle.
+    """
+    import time
+
+    output: List[str] = []
+
+    def emit(line: str) -> None:
+        line = line.rstrip("\r\n")
+        output.append(line + "\n")
+        if log_callback:
+            try:
+                log_callback(line)
+            except Exception:
+                pass
+
+    def run_ros(active_client, command: str, *, disconnect_is_expected: bool = False, confirm: bool = False) -> None:
+        try:
+            stdin, stdout, _stderr = active_client.exec_command(command, timeout=cfg.connect_timeout)
+            if confirm:
+                # RouterBOARD upgrade asks for an explicit y/n confirmation on
+                # RouterOS versions that expose the interactive prompt.
+                stdin.write("y\n")
+                stdin.flush()
+            stdout.channel.set_combine_stderr(True)
+            stdout.channel.settimeout(_EXEC_NO_TIMEOUT)
+            for raw in stdout:
+                emit(raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw)
+            status = stdout.channel.recv_exit_status()
+            if status != 0 and not disconnect_is_expected:
+                raise RuntimeError(f"RouterOS command exited {status}")
+        except (paramiko.SSHException, socket.error, OSError) as exc:
+            if not disconnect_is_expected:
+                raise
+            emit(f"[*] SSH disconnected as expected: {exc}")
+
+    try:
+        emit("[*] RouterOS detected; checking the stable update channel")
+        run_ros(client, "/system package update set channel=stable\n/system package update check-for-updates\n:delay 2s\n/system package update install", disconnect_is_expected=True)
+        client.close()
+
+        # Whether an update was available or not, reconnect before inspecting
+        # RouterBOARD.  A package install has rebooted; a no-op check simply
+        # reconnects immediately.
+        deadline = time.time() + cfg.exec_timeout
+        refreshed = None
+        last_error = ""
+        while time.time() < deadline:
+            candidate = _make_client(cfg.strict_host_keys)
+            try:
+                candidate.connect(
+                    hostname=target.host, port=target.port, username=target.user,
+                    password=password, timeout=cfg.connect_timeout,
+                    banner_timeout=cfg.connect_timeout, auth_timeout=cfg.connect_timeout,
+                    allow_agent=False, look_for_keys=False,
+                )
+                if not cfg.strict_host_keys:
+                    _save_known_hosts(candidate)
+                refreshed = candidate
+                break
+            except Exception as exc:  # RouterOS is expected to be booting here.
+                last_error = str(exc)
+                try:
+                    candidate.close()
+                except Exception:
+                    pass
+                time.sleep(5)
+        if refreshed is None:
+            raise RuntimeError(f"RouterOS did not return after package update: {last_error or 'connection timed out'}")
+
+        try:
+            emit("[*] RouterOS reachable after package update")
+            before = len(output)
+            run_ros(refreshed, "/system routerboard print")
+            board = "".join(output[before:])
+            current = re.search(r"current-firmware:\s*(\S+)", board, re.I)
+            available = re.search(r"upgrade-firmware:\s*(\S+)", board, re.I)
+            if current and available and current.group(1) != available.group(1):
+                emit(f"[*] Upgrading RouterBOARD firmware: {current.group(1)} -> {available.group(1)}")
+                run_ros(refreshed, "/system routerboard upgrade", confirm=True)
+            elif current and available:
+                emit(f"[*] RouterBOARD firmware already current ({current.group(1)})")
+            else:
+                emit("[!] Could not parse RouterBOARD firmware versions; review output above")
+
+            if reboot_systems:
+                emit("[*] Final reboot requested to apply updates/RouterBOARD firmware")
+                run_ros(refreshed, "/system reboot", disconnect_is_expected=True)
+            else:
+                emit("[*] Final reboot not requested; any RouterBOARD firmware update remains pending until the next reboot")
+        finally:
+            try:
+                refreshed.close()
+            except Exception:
+                pass
+        return HostResult(target.label, True, "done", success_text,
+                          exit_status=0, output="".join(output).strip(),
+                          duration_s=time.time() - started_at)
+    except Exception as exc:  # noqa: BLE001 - translate remote failures for the UI
+        return HostResult(target.label, False, "exec", f"RouterOS upgrade failed: {exc}",
+                          output="".join(output).strip(), duration_s=time.time() - started_at)
+
+
 def deploy_host(
     target: Target,
     password: str,
@@ -3309,6 +3433,7 @@ def deploy_host(
     success_text: str = "done",
     root_password: str = "",
     host_vars: Optional[Dict[str, str]] = None,
+    reboot_expected: bool = False,
     log_callback=None,
 ) -> HostResult:
     """
@@ -3384,7 +3509,7 @@ def deploy_host(
     # RouterOS has no POSIX shell, so the `export NAME='VAL'` prelude is
     # meaningless there — skip it (RouterOS scripts read CSV columns, if at
     # all, by other means).
-    if host_vars and interpreter != "routeros":
+    if host_vars and interpreter not in {"routeros", "routeros_system_upgrade"}:
         prelude = _build_host_vars_prelude(host_vars)
         if prelude:
             if script.startswith("#!"):
@@ -3397,6 +3522,19 @@ def deploy_host(
                 script = prelude + script
 
     try:
+        # RouterOS has no POSIX shell. Detect its SSH banner before choosing
+        # the built-in system-upgrade execution path.
+        if interpreter == "auto_system_upgrade":
+            tr = client.get_transport()
+            banner = (getattr(tr, "remote_version", "") or "") if tr is not None else ""
+            interpreter = "routeros_system_upgrade" if ("rosssh" in banner.lower() or "mikrotik" in banner.lower()) else "sh -s"
+
+        if interpreter == "routeros_system_upgrade":
+            return _upgrade_routeros_host(
+                client, target, password, cfg, success_text, reboot_systems=reboot_expected,
+                log_callback=log_callback, started_at=start,
+            )
+
         # ---- RouterOS (MikroTik) path -----------------------------------------
         # RouterOS lands you in its own console over SSH — there is no `sh`,
         # no `su`, no POSIX env. Piping to `sh -s` fails with
@@ -3506,7 +3644,7 @@ def deploy_host(
         exit_status = chan.recv_exit_status()
         output = "".join(out_chunks).strip()
         marker_present = "DEPLOY_RESULT=success" in output
-        ok = (exit_status == 0) and (marker_present if require_marker else True)
+        ok = (exit_status == 0 or (reboot_expected and marker_present)) and (marker_present if require_marker else True)
         if ok:
             msg = success_text
         elif exit_status == 0 and require_marker and not marker_present:

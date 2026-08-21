@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ScriptEditor } from '../../components/ScriptEditor'
+import { ScriptEditor } from '../../components/LazyScriptEditor'
 import { usePrompt } from '../../components/PromptProvider'
 import { useToast } from '../../components/ToastProvider'
 import {
-  ApiError,
+  errMsg,
   createScriptCategory,
   deleteScript,
   deleteScriptCategory,
@@ -25,10 +25,6 @@ function formatBytes(n: number): string {
 
 function formatModified(epochSeconds: number): string {
   return new Date(epochSeconds * 1000).toLocaleString()
-}
-
-function errMsg(err: unknown): string {
-  return err instanceof ApiError ? err.message : err instanceof Error ? err.message : String(err)
 }
 
 /** Label shown for the default (root) category. */

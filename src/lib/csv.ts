@@ -59,6 +59,25 @@ export function sanitizeVarName(raw: string): string {
   return s
 }
 
+/**
+ * The CSV's header names, exactly as written. These are the keys the backend
+ * uses for host_vars (and therefore what `root_password_column` must match) —
+ * unlike csvVariableNames(), which sanitises them into $variable form.
+ */
+export function csvHeaderNames(text: string): string[] {
+  const header = parseCsv(text)[0] ?? []
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const h of header) {
+    const name = (h || '').trim()
+    if (name && !seen.has(name)) {
+      seen.add(name)
+      out.push(name)
+    }
+  }
+  return out
+}
+
 /** The per-system shell variables available from a Compound CSV's columns. */
 export function csvVariableNames(text: string): string[] {
   const header = parseCsv(text)[0] ?? []
@@ -120,6 +139,16 @@ export function canonicalLabel(rawUrl: string): string {
   const user = u.username || 'root'
   const port = u.port || '22'
   return `ssh://${user}@${u.hostname}:${port}`
+}
+
+/** `ssh://root@pbx.example:22` → `pbx.example` — for display. */
+export function displayHost(label: string): string {
+  return label.replace(/^ssh:\/\/[^@]+@/, '').replace(/:\d+$/, '')
+}
+
+/** `ssh://root@pbx.example:22` → `root@pbx.example:22` — for copying. */
+export function bareHost(label: string): string {
+  return label.replace(/^ssh:\/\//, '')
 }
 
 export interface ColumnOverrides {
@@ -286,6 +315,128 @@ export interface ManualRow {
   url: string
   user: string
   password: string
+}
+
+export interface PastedRow extends ManualRow {
+  /** 0-based index of the source line, so the raw text can be filtered later. */
+  line: number
+}
+
+export interface PasteResult {
+  rows: PastedRow[]
+  /** Non-empty lines that weren't a usable SSH target. */
+  skipped: number
+  /** True when the first line looked like a spreadsheet header and was dropped. */
+  droppedHeader: boolean
+}
+
+const PASTE_HEADER_RE = /^(host|hosts|url|ssh|ssh_url|web ?site|target|ip|address)$/i
+
+/**
+ * Parse a pasted block of hosts into manual rows.
+ *
+ * One host per line, fields separated by TAB (so a spreadsheet selection pastes
+ * straight in) or comma:
+ *
+ *     10.0.0.5
+ *     ssh://admin@pbx.example:2222
+ *     pbx2.example,admin,hunter2
+ *     pbx3.example<TAB>admin<TAB>hunter2
+ *
+ * Fields 2 and 3 (user, password) are optional and fall back to the defaults.
+ * A `user@host` first field supplies the user too; an explicit user field wins.
+ * Blank lines and `#` comments are ignored, as is a leading spreadsheet header.
+ */
+export function parsePastedHosts(
+  text: string,
+  defaults: { user?: string; password?: string } = {},
+): PasteResult {
+  const rows: PastedRow[] = []
+  const seen = new Set<string>()
+  let skipped = 0
+  let droppedHeader = false
+  const lines = String(text || '').split(/\r?\n/)
+
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i]
+    const line = raw.trim()
+    if (!line || line.startsWith('#')) continue
+    const parts = (line.includes('\t') ? line.split('\t') : line.split(',')).map((f) => f.trim())
+    const target = parts[0] ?? ''
+    if (!target) continue
+    // A pasted spreadsheet usually brings its header row along.
+    if (!rows.length && !skipped && PASTE_HEADER_RE.test(target)) {
+      droppedHeader = true
+      continue
+    }
+    const url = normaliseSshTarget(target)
+    if (!url) {
+      skipped++
+      continue
+    }
+    const user = parts[1] || defaults.user || ''
+    const full = user ? injectUserIntoUrl(url, user) : url
+    const label = canonicalLabel(full)
+    if (!label) {
+      skipped++
+      continue
+    }
+    if (seen.has(label)) continue // same host twice in one paste
+    seen.add(label)
+    rows.push({ line: i, url, user, password: parts[2] || defaults.password || '' })
+  }
+  return { rows, skipped, droppedHeader }
+}
+
+/** Keep only the lines of a pasted block whose hosts pass `keep`. */
+export function filterPastedText(
+  text: string,
+  defaults: { user?: string; password?: string },
+  keep: (label: string) => boolean,
+): string {
+  const lines = String(text || '').split(/\r?\n/)
+  const drop = new Set<number>()
+  for (const row of parsePastedHosts(text, defaults).rows) {
+    const label = canonicalLabel(row.user ? injectUserIntoUrl(row.url, row.user) : row.url)
+    if (label && !keep(label)) drop.add(row.line)
+  }
+  return lines.filter((_l, i) => !drop.has(i)).join('\n')
+}
+
+/**
+ * Render manual rows as a canonical KeePass-format CSV, so a fleet typed by
+ * hand can be saved and later re-imported through "Import CSV". The output uses
+ * CANONICAL_HEADER, which resolveCompoundColumns() maps back onto url/login/
+ * password without the operator touching Column mapping.
+ *
+ * Unlike buildManualCsvs (which feeds a run) this tolerates blank passwords —
+ * exporting a partly-filled fleet to finish later is legitimate.
+ */
+export function manualRowsToCanonicalCsv(rows: ManualRow[]): string {
+  const lines: string[] = []
+  const seen = new Set<string>()
+  for (const row of rows) {
+    const raw = row.url.trim()
+    if (!raw) continue
+    const base = normaliseSshTarget(raw)
+    if (!base) continue
+    const usr = row.user.trim()
+    const url = usr ? injectUserIntoUrl(base, usr) : base
+    const label = canonicalLabel(url)
+    if (!label || seen.has(label)) continue
+    seen.add(label)
+    // Account is display-only; the hostname keeps the exported file readable.
+    let host = url
+    try {
+      host = new URL(url).hostname || url
+    } catch {
+      /* keep the raw url as the name */
+    }
+    const login = usr || 'root'
+    lines.push([host, login, row.password, url, ''].map(csvCell).join(','))
+  }
+  if (!lines.length) throw new Error('Enter at least one SSH URL or host first.')
+  return [CANONICAL_HEADER, ...lines].join('\n') + '\n'
 }
 
 /** Build the two virtual CSVs (ssh urls + host,password) from manual rows. */

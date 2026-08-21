@@ -40,7 +40,7 @@ const TABS: TabDef[] = [
     // what they do): these are per-action, and they're the only place the UI
     // states these are safe to run against a live PBX.
     actions: [
-      { id: 'apt_upgrade', label: 'Apt Upgrade', blurb: 'Patch Debian/OpenBSD without rebooting or restarting services.' },
+      { id: 'apt_upgrade', label: 'Upgrade System(s)', blurb: 'Upgrade Debian, OpenBSD, and detected RouterOS systems. RouterOS package installs reboot automatically.' },
       { id: 'quick_diag', label: 'Quick Diagnostic', blurb: 'Read-only health snapshot (uptime, load, mem, disk). Changes nothing.' },
     ],
   },
@@ -64,11 +64,13 @@ interface Props {
   onRun: (actionOverride?: ActionId) => void
   /** Abort the in-flight run (shown as a Stop button while running). */
   onStop: () => void
+  rebootSystems: boolean
+  setRebootSystems: (reboot: boolean) => void
   customScriptSlot: ReactNode
   threecxSlot: ReactNode
 }
 
-export function ActionPanel({ action, setAction, running, runHint, runHidden, onRun, onStop, customScriptSlot, threecxSlot }: Props) {
+export function ActionPanel({ action, setAction, running, runHint, runHidden, onRun, onStop, rebootSystems, setRebootSystems, customScriptSlot, threecxSlot }: Props) {
   const activeTab = TABS.find((t) => t.actions.some((a) => a.id === action)) ?? TABS[0]
   const current = activeTab.actions.find((a) => a.id === action) ?? activeTab.actions[0]
 
@@ -111,6 +113,21 @@ export function ActionPanel({ action, setAction, running, runHint, runHidden, on
             )}
 
             {current.blurb && <p className="run__blurb">{current.blurb}</p>}
+
+            {action === 'apt_upgrade' && (
+              <label className="run__check">
+                <input
+                  type="checkbox"
+                  checked={rebootSystems}
+                  disabled={running}
+                  onChange={(e) => setRebootSystems(e.target.checked)}
+                />
+                <span>
+                  Reboot System(s)
+                  <small> Apply pending Debian/OpenBSD updates and RouterBOARD firmware.</small>
+                </span>
+              </label>
+            )}
 
             {action === 'custom_script' && customScriptSlot}
             {action === 'threecx' && threecxSlot}

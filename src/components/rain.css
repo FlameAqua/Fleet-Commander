@@ -44,9 +44,14 @@
   }
 }
 
+/* Reduced motion: the drops' entire position comes from the animation, so
+   freezing it leaves an empty dark overlay and no rain. Hide the layer instead
+   — this one is pure decoration. */
 @media (prefers-reduced-motion: reduce) {
-  .rain__drop,
-  .app__raindrop {
+  :root:not([data-motion='full']) .rain {
+    display: none;
+  }
+  :root:not([data-motion='full']) .app__raindrop {
     animation: none;
   }
 }

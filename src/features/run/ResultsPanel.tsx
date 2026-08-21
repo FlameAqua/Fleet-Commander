@@ -1,18 +1,10 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { bareHost, displayHost } from '../../lib/csv'
 import { downloadBlob } from '../../lib/file'
 import type { DeployRun, HostCard } from './useDeployRun'
 import type { ExitCategory } from './exitCategories'
 import './run.css'
-
-function displayHost(label: string): string {
-  return label.replace(/^ssh:\/\/[^@]+@/, '').replace(/:\d+$/, '')
-}
-
-/** The bare host/URL of a result, for copying. */
-function hostUrl(label: string): string {
-  return label.replace(/^ssh:\/\//, '')
-}
 
 function safeName(label: string): string {
   return label.replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^_+|_+$/g, '') || 'host'
@@ -44,6 +36,33 @@ function groupLabelOf(card: HostCard, cats: ExitCategory[]): string {
   return cat ? cat.label : 'Error'
 }
 
+/**
+ * The filter bucket a card belongs to. Mirrors the count chips in the header:
+ * 'ok' | 'error' | 'skipped' | 'running' | 'queued', or `code-<n>` for a
+ * failure whose exit status matches a configured category.
+ */
+function bucketOf(card: HostCard, cats: ExitCategory[]): string {
+  if (card.status === 'fail') {
+    const cat = cats.find((c) => c.code === card.exitStatus)
+    return cat ? `code-${cat.code}` : 'error'
+  }
+  return card.status
+}
+
+/** Everything a search box should look through for one card. */
+function searchHaystack(card: HostCard, title: string | undefined): string {
+  return [
+    card.label,
+    title ?? '',
+    card.message ?? '',
+    card.stage ?? '',
+    card.exitStatus != null ? `exit ${card.exitStatus}` : '',
+    card.output != null ? card.output : card.lines.join('\n'),
+  ]
+    .join('\n')
+    .toLowerCase()
+}
+
 function cardLog(card: HostCard, cats: ExitCategory[]): string {
   const out = card.output != null ? card.output : card.lines.join('\n')
   return [
@@ -62,8 +81,6 @@ function cardLog(card: HostCard, cats: ExitCategory[]): string {
 interface Props {
   run: DeployRun
   onFallback: () => void
-  /** Provided only for Test-host runs — re-prompt for the password. */
-  onReenterPassword?: () => void
   /** Abort the in-flight run. */
   onStop: () => void
   /** Optional per-host title/account (label → title). */
@@ -74,15 +91,45 @@ interface Props {
   onOpenSettings: () => void
 }
 
-export function ResultsPanel({ run, onFallback, onReenterPassword, onStop, titles = {}, exitCategories, onOpenSettings }: Props) {
+export function ResultsPanel({ run, onFallback, onStop, titles = {}, exitCategories, onOpenSettings }: Props) {
   const { status, meta, fatal, cards, failedLabels } = run
   const [exportSel, setExportSel] = useState('all')
   const [openSet, setOpenSet] = useState<Set<string>>(new Set())
+  // Header chips filter by outcome; the box searches host, message, stage,
+  // exit code and log output.
+  const [filter, setFilter] = useState<string>('all')
+  const [query, setQuery] = useState('')
   const [ctx, setCtx] = useState<{ x: number; y: number; title: string; url: string } | null>(null)
+
+  // How many cards sit in each filter bucket ('ok', 'error', 'code-2', …).
+  const bucketCounts = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const c of cards) {
+      const b = bucketOf(c, exitCategories)
+      m.set(b, (m.get(b) ?? 0) + 1)
+    }
+    return m
+  }, [cards, exitCategories])
+
+  // A filter whose bucket empties mid-run (the last 'running' host finishes)
+  // shouldn't strand the operator on an empty list — fall back to 'all'.
+  const inBucket = (key: string) =>
+    key === 'running' ? bucketCounts.has('running') || bucketCounts.has('queued') : bucketCounts.has(key)
+  const activeFilter = filter === 'all' || inBucket(filter) ? filter : 'all'
+  const q = query.trim().toLowerCase()
+
+  const visible = useMemo(() => {
+    return cards.filter((c) => {
+      if (activeFilter !== 'all') {
+        const bucket = bucketOf(c, exitCategories)
+        const match = activeFilter === 'running' ? bucket === 'running' || bucket === 'queued' : bucket === activeFilter
+        if (!match) return false
+      }
+      return !q || searchHaystack(c, titles[c.label]).includes(q)
+    })
+  }, [cards, activeFilter, q, exitCategories, titles])
+
   if (status === 'idle' && !cards.length && !fatal) return null
-  // Show "Re-enter password" when a failure is an authentication failure.
-  const hasAuthFailure = cards.some((c) => c.status === 'fail' && c.stage === 'auth')
-  const allOpen = cards.length > 0 && cards.every((c) => openSet.has(c.label))
 
   function toggleCard(label: string) {
     setOpenSet((s) => {
@@ -92,8 +139,10 @@ export function ResultsPanel({ run, onFallback, onReenterPassword, onStop, title
       return next
     })
   }
-  function toggleAll() {
-    setOpenSet(allOpen ? new Set() : new Set(cards.map((c) => c.label)))
+  // Expand/collapse acts on what's actually on screen, so it stays predictable
+  // while a filter or search is narrowing the list.
+  function toggleAll(shown: HostCard[], everyShownOpen: boolean) {
+    setOpenSet(everyShownOpen ? new Set() : new Set(shown.map((c) => c.label)))
   }
 
   const byOutcome = {
@@ -108,6 +157,24 @@ export function ResultsPanel({ run, onFallback, onReenterPassword, onStop, title
     errors: byOutcome.error.length,
     skipped: byOutcome.skipped.length,
   }
+
+  // Chips shown in the header — each one filters the list below.
+  const chips: { key: string; label: string; count: number; tone: string }[] = [
+    { key: 'all', label: `${cards.length} host${cards.length === 1 ? '' : 's'}`, count: cards.length, tone: 'total' },
+  ]
+  if (n.ok > 0 || status === 'done') chips.push({ key: 'ok', label: `${n.ok} ok`, count: n.ok, tone: 'ok' })
+  for (const cat of exitCategories) {
+    const c = bucketCounts.get(`code-${cat.code}`) ?? 0
+    if (c > 0) chips.push({ key: `code-${cat.code}`, label: `${c} ${cat.label.toLowerCase()}`, count: c, tone: 'fail' })
+  }
+  if (n.errors > 0 || status === 'done')
+    chips.push({ key: 'error', label: `${n.errors} error${n.errors === 1 ? '' : 's'}`, count: n.errors, tone: 'err' })
+  if (n.skipped > 0) chips.push({ key: 'skipped', label: `${n.skipped} skipped`, count: n.skipped, tone: 'skip' })
+  const running = (bucketCounts.get('running') ?? 0) + (bucketCounts.get('queued') ?? 0)
+  if (running > 0) chips.push({ key: 'running', label: `${running} running`, count: running, tone: 'run' })
+
+  const isFiltered = activeFilter !== 'all' || !!q
+  const allOpen = visible.length > 0 && visible.every((c) => openSet.has(c.label))
 
   // Export groups shown in the dropdown: All, OK, one per exit-code category
   // that occurred, Error, Skipped.
@@ -148,22 +215,56 @@ export function ResultsPanel({ run, onFallback, onReenterPassword, onStop, title
         <h2 className="step__title">
           <span className="step__num">3</span> Results
         </h2>
-        <div className="results__counts">
-          {meta && <span>{meta.count} host{meta.count === 1 ? '' : 's'}</span>}
-          {(n.ok > 0 || status === 'done') && <span className="is-ok">{n.ok} ok</span>}
-          {exitCategories.map((cat) => {
-            const c = cards.filter((x) => x.status === 'fail' && x.exitStatus === cat.code).length
-            return c > 0 ? (
-              <span key={cat.code} className="is-fail">
-                {c} {cat.label.toLowerCase()}
-              </span>
-            ) : null
-          })}
-          {(n.errors > 0 || status === 'done') && <span className="is-err">{n.errors} errors</span>}
-          {n.skipped > 0 && <span className="is-skip">{n.skipped} skipped</span>}
+        <div className="results__counts" role="group" aria-label="Filter results by outcome">
+          {chips.map((c) => (
+            <button
+              key={c.key}
+              type="button"
+              className={`results__chip results__chip--${c.tone}${activeFilter === c.key ? ' is-active' : ''}`}
+              aria-pressed={activeFilter === c.key}
+              title={c.key === 'all' ? 'Show every system' : `Show only these (${c.count})`}
+              onClick={() => setFilter(activeFilter === c.key ? 'all' : c.key)}
+            >
+              {c.label}
+            </button>
+          ))}
           {status === 'running' && <span className="results__spin">running…</span>}
         </div>
       </div>
+
+      {cards.length > 1 && (
+        <div className="results__search">
+          <input
+            type="search"
+            className="results__searchinput"
+            placeholder="Search host, message or log output…"
+            value={query}
+            spellCheck={false}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') setQuery('')
+            }}
+            aria-label="Search results"
+          />
+          {isFiltered && (
+            <>
+              <span className="results__searchcount">
+                {visible.length} of {cards.length}
+              </span>
+              <button
+                type="button"
+                className="results__searchclear"
+                onClick={() => {
+                  setQuery('')
+                  setFilter('all')
+                }}
+              >
+                Clear
+              </button>
+            </>
+          )}
+        </div>
+      )}
 
       {cards.length > 0 && (
         <div className="results__exports">
@@ -215,7 +316,10 @@ export function ResultsPanel({ run, onFallback, onReenterPassword, onStop, title
       )}
 
       <div className="results__cards">
-        {cards.map((c) => (
+        {isFiltered && visible.length === 0 && (
+          <p className="results__empty">No systems match this filter.</p>
+        )}
+        {visible.map((c) => (
           <Card
             key={c.label}
             card={c}
@@ -236,7 +340,7 @@ export function ResultsPanel({ run, onFallback, onReenterPassword, onStop, title
               ■ Stop
             </button>
           )}
-          <button type="button" className="run__btn" onClick={toggleAll}>
+          <button type="button" className="run__btn" onClick={() => toggleAll(visible, allOpen)}>
             {allOpen ? 'Collapse all' : 'Expand all'}
           </button>
           <button
@@ -247,16 +351,9 @@ export function ResultsPanel({ run, onFallback, onReenterPassword, onStop, title
             ↑ Back to top
           </button>
           {status === 'done' && failedLabels.length > 0 && (
-            <>
-              <button type="button" className="run__btn" onClick={onFallback}>
-                Retry {failedLabels.length} failed host{failedLabels.length === 1 ? '' : 's'}
-              </button>
-              {onReenterPassword && hasAuthFailure && (
-                <button type="button" className="run__btn" onClick={onReenterPassword}>
-                  🔑 Re-enter password
-                </button>
-              )}
-            </>
+            <button type="button" className="run__btn" onClick={onFallback}>
+              Retry {failedLabels.length} failed host{failedLabels.length === 1 ? '' : 's'}
+            </button>
           )}
         </div>
       )}
@@ -361,7 +458,7 @@ function Card({
           onContextMenu={(e) => {
             if (window.getSelection()?.toString().trim()) return
             e.preventDefault()
-            onContext(e.clientX, e.clientY, title ?? host, hostUrl(card.label))
+            onContext(e.clientX, e.clientY, title ?? host, bareHost(card.label))
           }}
         >
           <span className={`card__dot card__dot--${outcome}`} />

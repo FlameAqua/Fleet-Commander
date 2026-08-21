@@ -1,15 +1,18 @@
 // Enumerate / restrict the hosts implied by a Source, for the "Test on one
 // host" chooser. Labels are the canonical Target.label the backend generates.
-import { buildCanonicalKeepass, canonicalLabel, injectUserIntoUrl } from '../../lib/csv'
-import type { SourceState } from '../source/sourceModel'
+import {
+  buildCanonicalKeepass,
+  canonicalLabel,
+  displayHost,
+  filterPastedText,
+  injectUserIntoUrl,
+  parsePastedHosts,
+} from '../../lib/csv'
+import type { PasteSource, SourceState } from '../source/sourceModel'
 
 export interface HostOption {
   value: string
   label: string
-}
-
-function display(label: string): string {
-  return label.replace(/^ssh:\/\/[^@]+@/, '').replace(/:\d+$/, '')
 }
 
 function manualLabel(url: string, user: string): string | null {
@@ -21,6 +24,14 @@ function manualLabel(url: string, user: string): string | null {
       ? u
       : `ssh://root@${u}`
   return canonicalLabel(full) || null
+}
+
+/** The rows a pasted block resolves to, with its defaults applied. */
+function pastedRows(source: PasteSource) {
+  return parsePastedHosts(source.text, {
+    user: source.defaultUser,
+    password: source.defaultPassword,
+  }).rows
 }
 
 /** The hosts currently selected for a run (checklist minus exclusions). */
@@ -37,20 +48,21 @@ export function selectedHosts(source: SourceState): HostOption[] {
         .filter((e) => !ex.has(e.label))
         .map((e) => ({
           value: e.label,
-          label: e.name && e.name !== e.label ? `${e.name} (${display(e.label)})` : display(e.label),
+          label: e.name && e.name !== e.label ? `${e.name} (${displayHost(e.label)})` : displayHost(e.label),
         }))
     } catch {
       return []
     }
   }
-  if (source.mode === 'manual') {
+  if (source.mode === 'manual' || source.mode === 'paste') {
+    const rows = source.mode === 'paste' ? pastedRows(source) : source.rows
     const out: HostOption[] = []
     const seen = new Set<string>()
-    for (const r of source.rows) {
+    for (const r of rows) {
       const label = manualLabel(r.url, r.user)
       if (!label || seen.has(label)) continue
       seen.add(label)
-      out.push({ value: label, label: display(label) })
+      out.push({ value: label, label: displayHost(label) })
     }
     return out
   }
@@ -81,6 +93,10 @@ export function restrictToHosts(source: SourceState, labels: string[]): SourceSt
   if (source.mode === 'manual') {
     return { ...source, rows: source.rows.filter((r) => { const l = manualLabel(r.url, r.user); return l !== null && keep.has(l) }) }
   }
+  if (source.mode === 'paste') {
+    const defaults = { user: source.defaultUser, password: source.defaultPassword }
+    return { ...source, text: filterPastedText(source.text, defaults, (l) => keep.has(l)) }
+  }
   return source
 }
 
@@ -102,6 +118,10 @@ export function deselectHosts(source: SourceState, labels: string[]): SourceStat
       }),
     }
   }
+  if (source.mode === 'paste') {
+    const defaults = { user: source.defaultUser, password: source.defaultPassword }
+    return { ...source, text: filterPastedText(source.text, defaults, (l) => !drop.has(l)) }
+  }
   return source
 }
 
@@ -122,6 +142,10 @@ export function restrictToHost(source: SourceState, label: string): SourceState 
   }
   if (source.mode === 'manual') {
     return { ...source, rows: source.rows.filter((r) => manualLabel(r.url, r.user) === label) }
+  }
+  if (source.mode === 'paste') {
+    const defaults = { user: source.defaultUser, password: source.defaultPassword }
+    return { ...source, text: filterPastedText(source.text, defaults, (l) => l === label) }
   }
   return source
 }

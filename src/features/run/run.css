@@ -215,6 +215,41 @@
   align-items: center;
   gap: 0.6rem;
 }
+/* Pre-flight script findings */
+.cs__lint {
+  list-style: none;
+  margin: 0;
+  padding: 0.5rem 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  font-size: 0.8rem;
+}
+.cs__lint li {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  color: var(--muted);
+}
+.cs__lint--warn {
+  color: #c08a2e;
+}
+.cs__lint--danger {
+  color: var(--error-text);
+  font-weight: 600;
+}
+.cs__linticon {
+  flex: none;
+}
+.cs__lintline {
+  flex: none;
+  font-size: 0.9em;
+  opacity: 0.85;
+}
+
 .cs__root {
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -297,23 +332,119 @@
 .results__head .step__title {
   margin: 0;
 }
+/* Outcome counts double as filter chips (same shape as the Validate
+   Connections modal's filters). */
 .results__counts {
   display: flex;
-  gap: 0.75rem;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
   font-size: 0.85rem;
   color: var(--muted);
 }
-.results__counts .is-ok {
+.results__chip {
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 0.2rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(127, 127, 127, 0.1);
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.results__chip:hover {
+  border-color: currentColor;
+}
+.results__chip--ok {
   color: #46c46a;
 }
-.results__counts .is-fail {
+.results__chip--fail {
   color: #d6a93a;
 }
-.results__counts .is-err {
+.results__chip--err {
   color: #e0564f;
 }
-.results__counts .is-skip {
-  color: #8b909c;
+.results__chip--skip,
+.results__chip--total {
+  color: var(--muted);
+}
+.results__chip--run {
+  color: var(--accent);
+}
+/* Active chip: fill with its own colour so the current filter is unmistakable. */
+.results__chip.is-active {
+  color: #fff;
+}
+.results__chip--ok.is-active {
+  background: #46c46a;
+  border-color: #46c46a;
+}
+.results__chip--fail.is-active {
+  background: #d6a93a;
+  border-color: #d6a93a;
+}
+.results__chip--err.is-active {
+  background: #e0564f;
+  border-color: #e0564f;
+}
+.results__chip--skip.is-active,
+.results__chip--total.is-active {
+  background: var(--muted);
+  border-color: var(--muted);
+}
+.results__chip--run.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+/* Search row */
+.results__search {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.results__searchinput {
+  font: inherit;
+  font-size: 0.85rem;
+  flex: 1 1 auto;
+  max-width: 420px;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+}
+.results__searchinput:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.results__searchcount {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.results__searchclear {
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 0.2rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.results__searchclear:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.results__empty {
+  margin: 0;
+  padding: 0.9rem;
+  text-align: center;
+  font-size: 0.85rem;
+  color: var(--muted);
+  border: 1px dashed var(--border);
+  border-radius: 8px;
 }
 .results__exports {
   display: flex;

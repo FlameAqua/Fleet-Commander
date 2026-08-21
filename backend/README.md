@@ -113,10 +113,13 @@ validation so nothing reaches the remote shell unescaped.
 
 ---
 
-## Action 2 — Apt upgrade
+## Action 2 — Upgrade System(s)
 
-Non-interactive patching that **never reboots and never restarts phone
-services**, even if the OS flags them as required.
+Non-interactive patching for Debian, OpenBSD, and detected MikroTik RouterOS
+systems. **Reboot System(s)** is off by default; when enabled it reboots the
+selected systems after their updates are staged. RouterOS package installation
+is the exception: RouterOS itself automatically reboots when it installs an OS
+update, then the tool reconnects to check and upgrade RouterBOARD firmware.
 
 ### Debian
 
@@ -125,9 +128,8 @@ NEEDRESTART_SUSPEND=1 apt-get update
 NEEDRESTART_SUSPEND=1 apt-get -y upgrade
 ```
 
-No `dist-upgrade`, no reboot, no service restarts. Pending-reboot or
-service-restart flags are surfaced in the log but never acted on — those
-require a maintenance window.
+No `dist-upgrade` and no service restarts. Pending-reboot or service-restart
+flags are surfaced in the log; select **Reboot System(s)** to apply them.
 
 ### OpenBSD
 
@@ -137,10 +139,17 @@ fw_update -a   # firmware patches
 # sysupgrade is DELIBERATELY SKIPPED — it reboots into installer
 ```
 
+### RouterOS
+
+The action sets the `stable` channel, checks for and installs RouterOS updates,
+reconnects after RouterOS's required install reboot, then compares and upgrades
+RouterBOARD firmware. Select **Reboot System(s)** to perform the final reboot
+that applies the RouterBOARD firmware.
+
 ### Recommended workflow
 
-1. Click **Test apt upgrade** first to dry-run against the test host.
-2. Click **Apt upgrade all hosts** once verified.
+1. Click **Test Upgrade System(s)** first against the test host.
+2. Click **Run on selected hosts** once verified.
 
 ---
 

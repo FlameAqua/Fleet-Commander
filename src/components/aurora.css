@@ -82,7 +82,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .aurora__band {
+  :root:not([data-motion='full']) .aurora__band {
     animation: none;
     opacity: calc(0.16 * var(--aurora-mul, 1));
   }

@@ -73,9 +73,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # Semver: a hyphen in the tag means a pre-release (v1.0.0-beta.3);
+          # a clean tag (v1.0.0) publishes as a normal release.
+          PRERELEASE=""
+          case "$GITHUB_REF_NAME" in
+            *-*) PRERELEASE="--prerelease" ;;
+          esac
           if ! gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
-              --prerelease --title "$GITHUB_REF_NAME" --notes "Fleet Commander $GITHUB_REF_NAME"
+              $PRERELEASE --title "$GITHUB_REF_NAME" --notes "Fleet Commander $GITHUB_REF_NAME"
           fi
       - name: Package & publish to GitHub Releases
         env:

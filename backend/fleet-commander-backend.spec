@@ -29,7 +29,16 @@ datas = [
     ("known_hosts", "."),
 ]
 
-hiddenimports = collect_submodules("cryptography") + collect_submodules("paramiko")
+hiddenimports = (
+    collect_submodules("cryptography")
+    + collect_submodules("paramiko")
+    # pykeepass loads these lazily (argon2 KDF, AES, XML), so PyInstaller
+    # cannot see them by static analysis.
+    + collect_submodules("pykeepass")
+    + collect_submodules("construct")
+    + collect_submodules("argon2")
+    + collect_submodules("Cryptodome")
+)
 
 
 a = Analysis(

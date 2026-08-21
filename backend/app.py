@@ -14,6 +14,7 @@ uploads.
 from __future__ import annotations
 
 import base64
+import io
 import json
 import os
 import queue as _queue_mod
@@ -637,6 +638,116 @@ def decrypt_csv_endpoint():
     return jsonify({"ok": True, "csv": csv_text, "filename": suggested})
 
 
+@app.route("/api/kdbx-csv", methods=["POST"])
+def kdbx_csv_endpoint():
+    """
+    Read a KeePass database (.kdbx) and return its SSH-able entries as a
+    canonical CSV — the same shape the CSV importer already understands
+    (Account, Login Name, Password, Web Site, Comments, Group).
+
+    Inputs (multipart/form-data):
+      * kdbx_file        - the .kdbx the operator picked
+      * master_password  - the vault password
+      * key_file         - optional key file, when the vault uses one
+
+    The vault is opened in memory and never written to disk. Only entries whose
+    URL parses as an SSH target are returned; everything else in the vault (web
+    logins, notes, attachments, TOTP seeds) is left behind deliberately - this
+    endpoint exists to build a fleet list, not to export a password database.
+
+    Returns:
+      200 {ok: true, csv: "...", filename: "...", total: N, usable: N, skipped: N}
+      400 {ok: false, error: "..."}   - no file / unreadable / nothing usable
+      401 {ok: false, error: "..."}   - wrong password or key file
+      503 {ok: false, error: "..."}   - pykeepass not installed
+    """
+    try:
+        from pykeepass import PyKeePass
+        from pykeepass.exceptions import CredentialsError
+    except ImportError:
+        return jsonify({
+            "ok": False,
+            "error": "The `pykeepass` Python package isn't installed on the server.",
+        }), 503
+
+    kdbx_file = request.files.get("kdbx_file")
+    if not kdbx_file or not kdbx_file.filename:
+        return jsonify({"ok": False, "error": "No kdbx_file uploaded."}), 400
+    master_password = request.form.get("master_password", "")
+    key_file = request.files.get("key_file")
+    if not master_password and not key_file:
+        return jsonify({"ok": False, "error": "Master password (or a key file) is required."}), 400
+
+    blob = kdbx_file.read()
+    if not blob:
+        return jsonify({"ok": False, "error": "KeePass file is empty."}), 400
+
+    # pykeepass wants file-like objects; keep everything in memory.
+    try:
+        kp = PyKeePass(
+            io.BytesIO(blob),
+            password=master_password or None,
+            keyfile=io.BytesIO(key_file.read()) if key_file else None,
+        )
+    except CredentialsError:
+        return jsonify({"ok": False, "error": "Wrong master password or key file."}), 401
+    except Exception as e:  # noqa: BLE001 - malformed/unsupported vault
+        return jsonify({"ok": False, "error": f"Couldn't open the KeePass file: {e}"}), 400
+
+    rows = []
+    seen = set()
+    total = 0
+    for entry in kp.entries:
+        total += 1
+        url = (entry.url or "").strip()
+        if not url:
+            continue
+        try:
+            target = deployer.parse_ssh_url(url)
+        except Exception:  # noqa: BLE001 - not an SSH target (web login, etc.)
+            continue
+        if not _HOSTNAME_RE.match(target.host):
+            continue
+        if target.label in seen:          # same host twice in the vault
+            continue
+        seen.add(target.label)
+        group = "/".join(entry.group.path) if getattr(entry, "group", None) else ""
+        rows.append([
+            entry.title or target.host,
+            entry.username or "",
+            entry.password or "",
+            url,
+            "",                            # Comments: notes stay in the vault
+            group,
+        ])
+
+    if not rows:
+        return jsonify({
+            "ok": False,
+            "error": f"No SSH entries found. Checked {total} "
+                     f"{'entry' if total == 1 else 'entries'} — an entry needs an "
+                     f"ssh:// (or bare host) URL to be usable here.",
+        }), 400
+
+    def cell(v):
+        v = "" if v is None else str(v)
+        return '"' + v.replace('"', '""') + '"' if re.search(r'[",\r\n]', v) else v
+
+    header = "Account,Login Name,Password,Web Site,Comments,Group"
+    csv_text = "\n".join([header] + [",".join(cell(c) for c in r) for r in rows]) + "\n"
+
+    base, _ = os.path.splitext(os.path.basename(kdbx_file.filename or "vault.kdbx"))
+    safe_base = re.sub(r"[^A-Za-z0-9._-]+", "_", base).strip("._-") or "vault"
+    return jsonify({
+        "ok": True,
+        "csv": csv_text,
+        "filename": safe_base + ".csv",
+        "total": total,
+        "usable": len(rows),
+        "skipped": total - len(rows),
+    })
+
+
 @app.route("/api/encrypt-csv", methods=["POST"])
 def encrypt_csv_endpoint():
     """
@@ -1032,6 +1143,10 @@ def open_folder():
     return jsonify({"ok": True, "dir": d})
 
 
+# Hostnames/IPs only — no spaces, no shell metacharacters.
+_HOSTNAME_RE = re.compile(r"^[A-Za-z0-9._\-]{1,255}$")
+
+
 @app.route("/api/settings", methods=["GET", "POST"])
 def settings_endpoint():
     """
@@ -1053,6 +1168,26 @@ def settings_endpoint():
                 if not os.path.isdir(p):
                     return jsonify({"ok": False, "error": f"Not a folder: {p}"}), 400
                 patch[key] = p
+        if "test_host" in data:
+            val = data.get("test_host")
+            if val is None:
+                patch["test_host"] = None          # None → back to the built-in default
+            else:
+                raw = str(val).strip()
+                if raw:
+                    # Must parse as an SSH target, or a typo silently becomes an
+                    # unreachable "sandbox" the operator thinks they tested on.
+                    # urlparse alone is too lax (it happily accepts spaces), so
+                    # check the hostname shape too.
+                    try:
+                        t = deployer.parse_ssh_url(raw if "://" in raw else f"ssh://{raw}")
+                        if not _HOSTNAME_RE.match(t.host):
+                            raise ValueError("bad hostname")
+                    except Exception:
+                        return jsonify({"ok": False, "error": f"Not a valid SSH target: {raw}"}), 400
+                    patch["test_host"] = raw if "://" in raw else f"ssh://{raw}"
+                else:
+                    patch["test_host"] = ""        # "" → no sandbox target offered
         bsm_paths.save_settings(patch)
     s = bsm_paths.load_settings()
     return jsonify({
@@ -1063,6 +1198,9 @@ def settings_endpoint():
         "scripts_dir_custom": bool((s.get("scripts_dir") or "").strip()),
         "default_csv_dir": bsm_paths.default_csv_dir(),
         "default_scripts_dir": bsm_paths.default_scripts_dir(),
+        "test_host": _configured_test_host(),
+        "default_test_host": deployer.TEST_HOST,
+        "test_host_custom": "test_host" in s,
     })
 
 
@@ -1128,12 +1266,24 @@ def spa_asset(filename):
     abort(404)
 
 
+def _configured_test_host() -> str:
+    """
+    The operator's sandbox target: a safe host to try an action against before
+    running it on the fleet. Settable in Settings; falls back to the built-in
+    TEST_HOST. Blank ("") is a deliberate choice meaning "don't offer one".
+    """
+    s = bsm_paths.load_settings()
+    if "test_host" in s:
+        return str(s.get("test_host") or "").strip()
+    return deployer.TEST_HOST
+
+
 @app.route("/api/config")
 def config():
-    """Static config the SPA needs at startup (Test Host label + heplify defaults)."""
+    """Static config the SPA needs at startup (test host + heplify defaults)."""
     return jsonify({
         "ok": True,
-        "test_host": deployer.TEST_HOST,
+        "test_host": _configured_test_host(),
         "defaults": {
             "interface": deployer.DEFAULT_INTERFACE,
             "hep_server": deployer.DEFAULT_HEP_SERVER,
@@ -1333,11 +1483,12 @@ def deploy():
         success_text   = "diagnostic complete"
 
     elif action == "apt_upgrade":
-        script = deployer.build_apt_upgrade_script()
+        reboot_systems = (request.form.get("reboot_systems", "") or "").strip().lower() in {"1", "true", "on", "yes"}
+        script = deployer.build_apt_upgrade_script(reboot_systems=reboot_systems)
         cfg.exec_timeout = max(cfg.exec_timeout, 900)  # patching can be slow
-        # POSIX sh: the script branches on OS at runtime (Debian apt-get vs
-        # OpenBSD pkg_add) and works under dash *and* OpenBSD's pdksh-as-sh.
-        interpreter  = "sh -s"
+        # Detect RouterOS from its SSH banner before selecting its console
+        # commands or the POSIX Debian/OpenBSD script.
+        interpreter  = "auto_system_upgrade"
         require_marker = True
         success_text = "upgrade complete"
 
@@ -1576,6 +1727,7 @@ def deploy():
                 success_text=success_text,
                 root_password=root_passwords.get(t.label, ""),
                 host_vars=host_vars_by_label.get(t.label),
+                reboot_expected=(action == "apt_upgrade" and reboot_systems),
                 log_callback=_cb,
             )
             payload = asdict(res)

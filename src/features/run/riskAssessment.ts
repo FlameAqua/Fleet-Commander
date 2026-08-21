@@ -69,7 +69,7 @@ function scriptContent(cs: CustomScriptState): string {
   return cs.source === 'library' ? cs.library.content : cs.source === 'paste' ? cs.paste : cs.upload.content
 }
 
-export function assessRisk(action: ActionId, threecx: ThreecxState, customScript: CustomScriptState): RiskAssessment {
+export function assessRisk(action: ActionId, threecx: ThreecxState, customScript: CustomScriptState, rebootSystems = false): RiskAssessment {
   switch (action) {
     case 'quick_diag':
       return { level: 'read-only', title: 'Quick diagnostic', summary: 'Read-only health snapshot — nothing on the systems is changed.', details: [] }
@@ -78,7 +78,14 @@ export function assessRisk(action: ActionId, threecx: ThreecxState, customScript
       return { level: 'modifies', title: 'Deploy heplify', summary: 'Installs/upgrades the heplify capture agent and starts its service on each system.', details: [] }
 
     case 'apt_upgrade':
-      return { level: 'modifies', title: 'Apt upgrade', summary: 'Updates and upgrades packages. No reboot and no service restarts.', details: [] }
+      return {
+        level: rebootSystems ? 'destructive' : 'modifies',
+        title: 'Upgrade system(s)',
+        summary: rebootSystems
+          ? 'Updates packages and reboots the selected systems to apply pending updates.'
+          : 'Updates Debian, OpenBSD, and RouterOS systems without an operator-requested reboot.',
+        details: rebootSystems ? ['RouterOS package installation may reboot automatically before its post-update firmware check.'] : [],
+      }
 
     case 'custom_script': {
       const content = scriptContent(customScript)

@@ -71,6 +71,12 @@
   padding: 0.85rem 0;
   border-top: 1px solid var(--border);
 }
+/* The rule is a separator *between* sections — the first one sits right under
+   the modal header, which already has its own border. */
+.settings__section:first-child {
+  border-top: none;
+  padding-top: 0.35rem;
+}
 .settings__section h4 {
   margin: 0 0 0.4rem;
   font-size: 0.92rem;
@@ -314,4 +320,26 @@
   cursor: pointer;
   font: inherit;
   font-size: 0.85rem;
+}
+
+/* Sandbox target row */
+.settings__testhost {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.settings__testhost input {
+  flex: 1 1 240px;
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+}
+.settings__testhost input:focus {
+  outline: none;
+  border-color: var(--accent);
 }

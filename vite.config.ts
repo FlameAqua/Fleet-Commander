@@ -45,6 +45,35 @@ export default defineConfig({
   build: {
     outDir: 'dist',
   },
+  // Pre-bundle these up front. The scanner can't see `react/compiler-runtime`
+  // (the React Compiler injects that import *after* the scan), so without the
+  // list a cold start optimises, discovers it late, optimises again and forces
+  // a full page reload. Naming them makes it one pass.
+  //
+  // Discovery itself is deliberately left ON: skipping it (`noDiscovery`) shaves
+  // ~10s off a cold boot but silently breaks dev the moment someone adds a
+  // dependency without editing this list. Not worth the trap.
+  //
+  // A cold pre-bundle (first run after any dependency change) takes a while —
+  // CodeMirror alone is ~30 packages. tools/dev-electron.mjs waits it out.
+  optimizeDeps: {
+    include: [
+      'react',
+      'react-dom',
+      'react-dom/client',
+      'react/jsx-runtime',
+      'react/jsx-dev-runtime',
+      'react/compiler-runtime',
+      '@codemirror/state',
+      '@codemirror/view',
+      '@codemirror/commands',
+      '@codemirror/language',
+      '@codemirror/autocomplete',
+      '@codemirror/search',
+      '@codemirror/legacy-modes/mode/shell',
+      '@lezer/highlight',
+    ],
+  },
   plugins: [
     react(),
     babel({ presets: [reactCompilerPreset()] })

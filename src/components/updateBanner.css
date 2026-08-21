@@ -58,7 +58,7 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .upd__spinner {
+  :root:not([data-motion='full']) .upd__spinner {
     animation: none;
   }
 }

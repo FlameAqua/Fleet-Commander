@@ -299,6 +299,81 @@
   cursor: pointer;
 }
 
+/* Paste List */
+.src-paste {
+  width: 100%;
+  min-height: 190px;
+  resize: vertical;
+  font: 0.85rem/1.5 var(--mono);
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--code-bg);
+  color: var(--text);
+}
+.src-paste:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.src-pastedefaults {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.src-pastedefaults label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+  flex: 1 1 180px;
+}
+.src-pastedefaults input {
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+}
+.src-pastesummary {
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+.src-pastesummary.is-warn {
+  color: var(--error-text);
+}
+
+/* Add-host on the left, export actions pushed to the right. */
+.src-manualbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.src-manualbar__spacer {
+  flex: 1;
+}
+.src-manualbar__export {
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.35rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+}
+.src-manualbar__export:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--text-h);
+}
+.src-manualbar__export:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
 .src-testhost {
   display: inline-block;
   word-break: break-all;

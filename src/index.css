@@ -23,6 +23,16 @@
   --error-bg: #3b1414;
   --error-text: #ffb4b4;
   --error-border: rgba(224, 86, 79, 0.5);
+
+  /* Script editor syntax colours (see ScriptEditor.tsx). */
+  --tok-comment: #6f7788;
+  --tok-keyword: #c792ea;
+  --tok-string: #a5d6a7;
+  --tok-number: #f9a86b;
+  --tok-variable: #82b8ff;
+  --tok-function: #7fd6c4;
+  --tok-operator: #9aa2b1;
+  --tok-meta: #8b909c;
 }
 
 /* Day — bright sky, dark readable text, clouds instead of stars. */
@@ -40,6 +50,16 @@
   --error-bg: #fdeceb;
   --error-text: #b3261e;
   --error-border: rgba(180, 38, 30, 0.35);
+
+  /* Script editor syntax colours, darkened for the light background. */
+  --tok-comment: #7b879b;
+  --tok-keyword: #7b3fbf;
+  --tok-string: #1f7a3d;
+  --tok-number: #b35309;
+  --tok-variable: #1d5fb8;
+  --tok-function: #0f7a72;
+  --tok-operator: #5b6b86;
+  --tok-meta: #5b6b86;
 }
 
 * {

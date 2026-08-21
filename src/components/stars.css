@@ -37,7 +37,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .star {
+  :root:not([data-motion='full']) .star {
     animation: none;
     opacity: 0.35;
   }

@@ -1,9 +1,10 @@
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import { ScriptsPanel } from '../scripts/ScriptsPanel'
 import { Segmented } from '../../components/Segmented'
-import { ScriptEditor } from '../../components/ScriptEditor'
+import { ScriptEditor } from '../../components/LazyScriptEditor'
 import { useTip } from '../../components/ToastProvider'
 import { readFileText } from '../../lib/file'
+import { lintScript, normaliseScript } from './scriptLint'
 import type { CustomScriptArgs, RootMode, ScriptInterpreter } from './deployForm'
 import './run.css'
 
@@ -43,16 +44,21 @@ export function resolveCustomScript(cs: CustomScriptState): CustomScriptArgs | n
     rootColumn: cs.rootColumn,
     interpreter: cs.interpreter,
   }
+  // normaliseScript(): a CRLF script silently fails on the target (the shebang
+  // parses as bash-plus-CR and every value picks up a trailing CR), and scripts get
+  // authored on Windows here, so strip them on the way out.
   if (cs.source === 'library') {
     return cs.library.content.trim()
-      ? { content: cs.library.content, filename: cs.library.name || 'library-script.sh', ...root }
+      ? { content: normaliseScript(cs.library.content), filename: cs.library.name || 'library-script.sh', ...root }
       : null
   }
   if (cs.source === 'paste') {
-    return cs.paste.trim() ? { content: cs.paste, filename: 'pasted-script.sh', ...root } : null
+    return cs.paste.trim()
+      ? { content: normaliseScript(cs.paste), filename: 'pasted-script.sh', ...root }
+      : null
   }
   return cs.upload.content.trim()
-    ? { content: cs.upload.content, filename: cs.upload.name || 'uploaded-script.sh', ...root }
+    ? { content: normaliseScript(cs.upload.content), filename: cs.upload.name || 'uploaded-script.sh', ...root }
     : null
 }
 
@@ -67,14 +73,23 @@ interface Props {
   onChange: (v: CustomScriptState) => void
   /** Per-system variables from the loaded Compound CSV (for `$` autocomplete). */
   variables: string[]
+  /**
+   * Raw CSV header names. Distinct from `variables`: the backend matches the
+   * root-password column against the untouched header, not the $var form.
+   */
+  columns: string[]
   /** True when the source is an imported CSV — enables the per-host root column. */
   csvAvailable: boolean
 }
 
-export function CustomScriptPanel({ value, onChange, variables, csvAvailable }: Props) {
+export function CustomScriptPanel({ value, onChange, variables, columns, csvAvailable }: Props) {
   const set = (patch: Partial<CustomScriptState>) => onChange({ ...value, ...patch })
   const tip = useTip()
   const showExitTip = () => tip('exit-codes', EXIT_CODE_TIP)
+  // Pre-flight checks on whichever script is actually selected.
+  const active =
+    value.source === 'library' ? value.library.content : value.source === 'paste' ? value.paste : value.upload.content
+  const findings = useMemo(() => lintScript(active, value.interpreter), [active, value.interpreter])
 
   // The "root password from a CSV column" mode only makes sense with an
   // imported CSV. If the source changes away from CSV while it's selected,
@@ -127,6 +142,20 @@ export function CustomScriptPanel({ value, onChange, variables, csvAvailable }: 
         </div>
       )}
 
+      {findings.length > 0 && (
+        <ul className="cs__lint">
+          {findings.map((f, i) => (
+            <li key={i} className={`cs__lint--${f.level}`}>
+              <span className="cs__linticon" aria-hidden="true">
+                {f.level === 'danger' ? '⛔' : f.level === 'warn' ? '⚠' : 'ℹ'}
+              </span>
+              {f.line != null && <code className="cs__lintline">line {f.line}</code>}
+              <span>{f.message}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+
       {value.interpreter === 'routeros' ? (
         <p className="run__note">
           Commands are sent straight to the RouterOS console (e.g. <code>/system resource print</code>).
@@ -175,16 +204,36 @@ export function CustomScriptPanel({ value, onChange, variables, csvAvailable }: 
               />
               Root (take root password from a CSV column)
             </label>
-            {value.rootMode === 'csv' && (
-              <input
-                className="cs__rootinput"
-                type="text"
-                placeholder="CSV column to read from"
-                value={value.rootColumn}
-                onChange={(e) => set({ rootColumn: e.target.value })}
-                spellCheck={false}
-              />
-            )}
+            {value.rootMode === 'csv' &&
+              (columns.length ? (
+                <select
+                  className="cs__rootinput"
+                  value={value.rootColumn}
+                  onChange={(e) => set({ rootColumn: e.target.value })}
+                  aria-label="CSV column holding the root password"
+                >
+                  <option value="">Choose a column…</option>
+                  {columns.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                  {/* A column remembered from a previous CSV that this one lacks —
+                      keep it visible rather than silently switching selection. */}
+                  {value.rootColumn && !columns.includes(value.rootColumn) && (
+                    <option value={value.rootColumn}>{value.rootColumn} (not in this CSV)</option>
+                  )}
+                </select>
+              ) : (
+                <input
+                  className="cs__rootinput"
+                  type="text"
+                  placeholder="CSV column to read from"
+                  value={value.rootColumn}
+                  onChange={(e) => set({ rootColumn: e.target.value })}
+                  spellCheck={false}
+                />
+              ))}
           </>
         )}
           <p className="run__note">

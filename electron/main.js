@@ -191,8 +191,24 @@ function createWindow () {
   // Both modes load a URL so the renderer is same-origin with the API:
   //   dev  → the Vite dev server (HMR)
   //   prod → the Flask-served SPA (waitForBackend has confirmed it's up)
-  mainWindow.loadURL(isDev ? VITE_DEV_SERVER_URL : BACKEND_URL)
-  if (isDev) mainWindow.webContents.openDevTools({ mode: 'detach' })
+  const startUrl = isDev ? VITE_DEV_SERVER_URL : BACKEND_URL
+  mainWindow.loadURL(startUrl)
+  // Detached DevTools costs ~3s of dev startup — FC_DEVTOOLS=0 skips it.
+  if (isDev && process.env.FC_DEVTOOLS !== '0') mainWindow.webContents.openDevTools({ mode: 'detach' })
+
+  // A failed load leaves a permanently blank window — Electron never retries on
+  // its own. That's the difference between "the dev server was still warming up
+  // for one more second" and "restart the whole stack", so retry a few times.
+  let loadRetries = 0
+  mainWindow.webContents.on('did-fail-load', (_e, code, desc, _url, isMainFrame) => {
+    if (!isMainFrame) return
+    if (code === -3) return // ERR_ABORTED — a superseded navigation, not a failure
+    if (loadRetries++ >= 20 || !mainWindow || mainWindow.isDestroyed()) return
+    console.error(`[window] load failed (${code} ${desc}) — retry ${loadRetries}`)
+    setTimeout(() => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.loadURL(startUrl)
+    }, 500)
+  })
 
   // Reveal the window reliably. `ready-to-show` is the ideal trigger, but on
   // some setups it fires late or not at all (frameless window, slow first

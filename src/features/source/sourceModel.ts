@@ -5,11 +5,13 @@
 //   compound — one imported CSV (column-mapped, extra cols → host_vars); the
 //              operator picks which hosts changes apply to via `excluded`
 //   manual   — type-in rows (url/user/password) → virtual ssh + pass CSVs
-//   test     — the hardcoded TEST_HOST; password is prompted at run time
+//   paste    — a pasted block of hosts (one per line, TAB/comma separated),
+//              parsed into the same rows `manual` produces
 import {
   buildCanonicalKeepass,
   buildManualCsvs,
   canonicalCsvFromEntries,
+  parsePastedHosts,
   type ColumnOverrides,
   type ManualRow,
 } from '../../lib/csv'
@@ -35,11 +37,16 @@ export interface ManualSource {
   rows: ManualRow[]
 }
 
-export interface TestSource {
-  mode: 'test'
+export interface PasteSource {
+  mode: 'paste'
+  /** The raw pasted text — kept verbatim so the operator can keep editing it. */
+  text: string
+  /** Applied to any line that doesn't carry its own user / password. */
+  defaultUser: string
+  defaultPassword: string
 }
 
-export type SourceState = CompoundSource | ManualSource | TestSource
+export type SourceState = CompoundSource | ManualSource | PasteSource
 export type SourceMode = SourceState['mode']
 
 export function emptySource(mode: SourceMode): SourceState {
@@ -48,20 +55,18 @@ export function emptySource(mode: SourceMode): SourceState {
       return { mode, file: null, overrides: {}, useLogin: false, excluded: [] }
     case 'manual':
       return { mode, rows: [{ url: '', user: '', password: '' }] }
-    case 'test':
-      return { mode }
+    case 'paste':
+      return { mode, text: '', defaultUser: '', defaultPassword: '' }
   }
 }
 
 export interface BuildSourceArgs {
   /** Action being run — controls whether host_vars are attached. */
   action: string
-  /** Run mode: 'universal' | 'test' | 'fallback'. */
-  runMode: 'universal' | 'test' | 'fallback'
+  /** Run mode: 'universal' | 'fallback'. */
+  runMode: 'universal' | 'fallback'
   /** For 3CX csv password mode — expose the password column under this name. */
   forcePwCol?: string | null
-  /** Required when source.mode === 'test' (prompted from the operator). */
-  testPassword?: string
 }
 
 function blob(text: string, type = 'text/csv'): Blob {
@@ -73,12 +78,6 @@ function blob(text: string, type = 'text/csv'): Blob {
  * user-facing message when the source is incomplete/invalid.
  */
 export function appendSourceToForm(fd: FormData, source: SourceState, args: BuildSourceArgs): void {
-  if (args.runMode === 'test') {
-    if (!args.testPassword) throw new Error('Password required for the test run.')
-    fd.append('test_password', args.testPassword)
-    return
-  }
-
   switch (source.mode) {
     case 'compound': {
       if (!source.file) throw new Error('Select a CSV first.')
@@ -106,9 +105,16 @@ export function appendSourceToForm(fd: FormData, source: SourceState, args: Buil
       fd.append('pass_csv', blob(passText), 'manual-passwords.csv')
       return
     }
-    case 'test':
-      // handled above when runMode === 'test'; a non-test run with a test
-      // source is a misconfiguration.
-      throw new Error('Test Host source requires the Test run mode.')
+    case 'paste': {
+      const { rows } = parsePastedHosts(source.text, {
+        user: source.defaultUser,
+        password: source.defaultPassword,
+      })
+      if (!rows.length) throw new Error('Paste at least one host first.')
+      const { sshText, passText } = buildManualCsvs(rows)
+      fd.append('ssh_csv', blob(sshText), 'pasted-urls.csv')
+      fd.append('pass_csv', blob(passText), 'pasted-passwords.csv')
+      return
+    }
   }
 }

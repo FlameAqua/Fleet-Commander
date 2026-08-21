@@ -5,13 +5,17 @@ import './clouds.css'
 export function Clouds({ density = 5 }: { density?: number }) {
   const clouds = useMemo(() => {
     const count = Math.round(Math.min(10, Math.max(1, density)) * 2.2) // 1→2, 5→11, 10→22
-    return Array.from({ length: count }, () => ({
+    return Array.from({ length: count }, (_, i) => ({
       top: 2 + Math.random() * 40,
       width: 150 + Math.random() * 190,
       opacity: 0.5 + Math.random() * 0.35,
       dur: 90 + Math.random() * 110,
       delay: -Math.random() * 160,
       rtl: Math.random() < 0.4,
+      // Resting position used when the animation can't run (reduced motion —
+      // which Windows turns on for RDP sessions). Evenly spaced with a little
+      // jitter so a still sky still looks like a sky instead of one pile.
+      restX: ((i + 0.5) / count) * 108 - 6 + (Math.random() * 8 - 4),
     }))
   }, [density])
 
@@ -30,6 +34,7 @@ export function Clouds({ density = 5 }: { density?: number }) {
               opacity: c.opacity,
               animationDuration: `${c.dur}s`,
               animationDelay: `${c.delay}s`,
+              '--cloud-rest-x': `${c.restX.toFixed(2)}vw`,
             } as CSSProperties
           }
         >

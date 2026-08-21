@@ -29,6 +29,11 @@ async function parseJson<T>(res: Response): Promise<T> {
   return data as T
 }
 
+/** The message to show a user for anything thrown by this module. */
+export function errMsg(err: unknown): string {
+  return err instanceof ApiError ? err.message : err instanceof Error ? err.message : String(err)
+}
+
 export async function apiGet<T>(path: string): Promise<T> {
   return parseJson<T>(await fetch(apiUrl(path)))
 }
@@ -142,21 +147,6 @@ export async function deleteScriptCategory(name: string, dir = ''): Promise<numb
   return r.moved
 }
 
-/** Move a script between categories. Empty strings mean the default category. */
-export async function moveScript(
-  name: string,
-  fromCategory: string,
-  toCategory: string,
-  dir = '',
-): Promise<void> {
-  const fd = new FormData()
-  fd.append('name', name)
-  fd.append('from_category', fromCategory)
-  fd.append('to_category', toCategory)
-  if (dir.trim()) fd.append('dir', dir.trim())
-  await parseJson<{ ok: true }>(await fetch(apiUrl('/api/scripts/move'), { method: 'POST', body: fd }))
-}
-
 /** Opens the OS folder picker server-side. Returns the chosen path, or null if cancelled. */
 export async function pickScriptsDir(): Promise<string | null> {
   const data = await parseJson<{ ok: true; path: string | null }>(
@@ -211,24 +201,44 @@ export async function decryptCsv(file: File, masterPassword: string): Promise<De
   return { csv: data.csv, filename: data.filename }
 }
 
-/** Encrypt a plaintext CSV into the `.enc` format; returns the blob + suggested name. */
-export async function encryptCsv(
+export interface KdbxImport extends DecryptedCsv {
+  /** Entries in the vault. */
+  total: number
+  /** Entries that had a usable SSH URL. */
+  usable: number
+  /** Entries left behind (web logins, no URL, duplicate host). */
+  skipped: number
+}
+
+/**
+ * Read a KeePass vault and get its SSH-able entries back as a canonical CSV.
+ * The vault is opened server-side (loopback only) and never written to disk;
+ * notes, attachments and non-SSH entries are left in the vault.
+ */
+export async function importKdbx(
   file: File,
   masterPassword: string,
-): Promise<{ blob: Blob; filename: string }> {
+  keyFile?: File | null,
+): Promise<KdbxImport> {
   const fd = new FormData()
-  fd.append('csv_file', file)
+  fd.append('kdbx_file', file)
   fd.append('master_password', masterPassword)
-  const res = await fetch(apiUrl('/api/encrypt-csv'), { method: 'POST', body: fd })
-  if (!res.ok) {
-    // Error responses are JSON even though success is binary.
-    const data = (await res.json().catch(() => ({}))) as { error?: string }
-    throw new ApiError(data.error ?? `${res.status} ${res.statusText}`, res.status)
+  if (keyFile) fd.append('key_file', keyFile)
+  const data = await parseJson<{
+    ok: true
+    csv: string
+    filename: string
+    total: number
+    usable: number
+    skipped: number
+  }>(await fetch(apiUrl('/api/kdbx-csv'), { method: 'POST', body: fd }))
+  return {
+    csv: data.csv,
+    filename: data.filename,
+    total: data.total,
+    usable: data.usable,
+    skipped: data.skipped,
   }
-  const cd = res.headers.get('Content-Disposition') ?? ''
-  const m = /filename="?([^"]+)"?/.exec(cd)
-  const filename = m ? m[1] : 'fleet.enc'
-  return { blob: await res.blob(), filename }
 }
 
 /** Encrypt a plaintext CSV and save the `.enc` straight into the CSV library folder. */
@@ -259,13 +269,6 @@ export async function deleteCsvFile(path: string): Promise<void> {
   )
 }
 
-/** Open the CSV library folder in the OS file manager (local desktop). */
-export async function openCsvFolder(): Promise<{ dir: string }> {
-  return parseJson<{ ok: true; dir: string }>(
-    await fetch(apiUrl('/api/open-csv-folder'), { method: 'POST' }),
-  )
-}
-
 // --- App settings (folder overrides) -------------------------------------- //
 export interface AppSettings {
   csv_dir: string
@@ -274,6 +277,10 @@ export interface AppSettings {
   scripts_dir_custom: boolean
   default_csv_dir: string
   default_scripts_dir: string
+  /** Sandbox target offered in "Input Manually" — '' means none. */
+  test_host: string
+  default_test_host: string
+  test_host_custom: boolean
 }
 
 export function getSettings(): Promise<AppSettings & { ok: boolean }> {
@@ -291,6 +298,8 @@ function jsonPost(path: string, body: unknown): Promise<Response> {
 export async function saveSettings(patch: {
   csv_dir?: string | null
   scripts_dir?: string | null
+  /** '' clears the sandbox target; null restores the built-in default. */
+  test_host?: string | null
 }): Promise<AppSettings> {
   return parseJson<AppSettings>(await jsonPost('/api/settings', patch))
 }

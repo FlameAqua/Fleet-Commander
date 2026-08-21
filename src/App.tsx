@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { apiGet, authCheck, getConfig, type AuthResult } from './api'
-import { buildCanonicalKeepass, csvVariableNames } from './lib/csv'
+import { buildCanonicalKeepass, csvHeaderNames, csvVariableNames } from './lib/csv'
 import { SourcePanel } from './features/source/SourcePanel'
 import { emptySource, type SourceMode, type SourceState } from './features/source/sourceModel'
 import { ActionPanel } from './features/run/ActionPanel'
@@ -62,10 +62,22 @@ const INITIAL_CONFIG: DeployConfigForm = {
 
 interface LastRun {
   src: SourceState
-  pw?: string
   op?: ThreecxOperation
   act: ActionId
   tcxConfig?: object
+  rebootSystems?: boolean
+}
+
+/** Overrides for a single run. All optional — omitted fields use current UI state. */
+interface RunOptions {
+  /** Run against this source instead of the live one (batching, retries). */
+  src?: SourceState
+  op?: ThreecxOperation
+  act?: ActionId
+  tcxConfig?: object
+  /** Append to the existing results list rather than replacing it. */
+  append?: boolean
+  reboot?: boolean
 }
 
 function App() {
@@ -116,10 +128,10 @@ function App() {
   const [sourceStates, setSourceStates] = useState<Record<SourceMode, SourceState>>(() => ({
     compound: emptySource('compound'),
     manual: emptySource('manual'),
-    test: emptySource('test'),
+    paste: emptySource('paste'),
   }))
-  const [testPassword, setTestPassword] = useState('')
   const [action, setAction] = useState<ActionId>('custom_script')
+  const [rebootSystems, setRebootSystems] = useState(false)
   const [config, setConfig] = useState<DeployConfigForm>(INITIAL_CONFIG)
   const [customScript, setCustomScript] = useState<CustomScriptState>(() => emptyCustomScript())
   const [threecx, setThreecx] = useState<ThreecxState>(() => emptyThreecx())
@@ -143,6 +155,9 @@ function App() {
   useEffect(() => {
     // Panel-transition toggle drives the CSS; persist the whole prefs object.
     document.documentElement.dataset.anim = anim.panel ? 'on' : 'off'
+    // 'full' overrides the OS reduced-motion request (see Settings → Animate
+    // anyway); the effect stylesheets key their fallbacks off this.
+    document.documentElement.dataset.motion = anim.forceMotion ? 'full' : 'auto'
     try {
       localStorage.setItem('fc.anim', JSON.stringify(anim))
     } catch {
@@ -182,7 +197,7 @@ function App() {
     getConfig()
       .then((c) => {
         if (cancelled) return
-        setTestHost(c.test_host)
+        setTestHost(c.test_host || null)
         setConfig((prev) => ({
           ...prev,
           interface: c.defaults.interface,
@@ -198,8 +213,19 @@ function App() {
     }
   }, [])
 
+  // Settings can change the sandbox target while the app is open.
+  useEffect(() => {
+    const refresh = () => {
+      getConfig()
+        .then((c) => setTestHost(c.test_host || null))
+        .catch(() => {})
+    }
+    window.addEventListener('fc:test-host-changed', refresh)
+    return () => window.removeEventListener('fc:test-host-changed', refresh)
+  }, [])
+
   // Per-system variables available to custom scripts (Compound CSV column names).
-  // Test/Manual have no CSV, but the backend mirrors each host's SSH password
+  // Manual/Paste have no CSV, but the backend mirrors each host's SSH password
   // into $Password for them, so offer that one.
   const availableVars = useMemo(
     () =>
@@ -208,6 +234,13 @@ function App() {
           ? csvVariableNames(source.file.text)
           : []
         : ['Password'],
+    [source],
+  )
+
+  // Raw CSV header names — what the backend matches `root_password_column`
+  // against (host_vars is keyed by the untouched header, not the $var form).
+  const csvColumns = useMemo(
+    () => (source.mode === 'compound' && source.file ? csvHeaderNames(source.file.text) : []),
     [source],
   )
 
@@ -227,36 +260,24 @@ function App() {
     }
   }, [source])
 
-  const isTest = source.mode === 'test'
-  const hostCount = isTest ? 1 : selectedHosts(source).length
-  const canProceed = isTest || hostCount > 0
-  const systemsLabel = isTest ? 'the test host' : `${hostCount} system${hostCount === 1 ? '' : 's'}`
+  const hostCount = selectedHosts(source).length
+  const canProceed = hostCount > 0
+  const systemsLabel = `${hostCount} system${hostCount === 1 ? '' : 's'}`
   // Newline-separated list of every selected system, for a native tooltip.
-  const systemsTooltip = (isTest ? [testHost ?? 'test host'] : selectedHosts(source).map((h) => h.label)).join('\n')
+  const systemsTooltip = selectedHosts(source).map((h) => h.label).join('\n')
   // Signature of a selection — used to cache/invalidate validation results.
   const sigForSource = (src: SourceState): string =>
-    src.mode === 'test' ? `test:${testHost ?? ''}` : selectedHosts(src).map((h) => h.value).sort().join('|')
+    selectedHosts(src).map((h) => h.value).sort().join('|')
   const selectionSig = sigForSource(source)
 
   function onModeChange(m: SourceMode) {
     setSourceMode(m)
   }
 
-  // Advancing to Step 2 asks for the Test-host password once (reused per run).
   async function continueToActions() {
-    if (isTest && !testPassword) {
-      const pw = await prompt({
-        title: 'Test host password',
-        message: `Enter the password for ${testHost ?? 'the test host'} (reused for every action):`,
-        password: true,
-        confirmLabel: 'Continue',
-      })
-      if (!pw) return
-      setTestPassword(pw)
-    }
     // Nudge to validate connections first — but only when advancing from the
     // fleet step. Navigating back to Actions from Results must never re-prompt.
-    if (step === 'source' && !isTest && !hasValidatedCurrent) {
+    if (step === 'source' && !hasValidatedCurrent && skipValidateSig !== selectionSig) {
       const choice = await prompt({
         title: 'Continue without validating?',
         message:
@@ -272,6 +293,7 @@ function App() {
         onValidateClick()
         return
       }
+      setSkipValidateSig(selectionSig) // don't ask again for this same fleet
     }
     setStep('action')
   }
@@ -300,7 +322,7 @@ function App() {
 
   function goToStage(target: Step) {
     if (target === step || !stageReachable(target)) return
-    // Going to actions may need the Test-host password first.
+    // Advancing to Actions runs the pre-flight checks (validation nudge).
     if (target === 'action') {
       void continueToActions()
       return
@@ -316,6 +338,10 @@ function App() {
   const [authFilter, setAuthFilter] = useState<'all' | 'passed' | 'failed'>('all')
   // Which selection the cached results belong to (so we can reopen vs re-run).
   const [authSig, setAuthSig] = useState('')
+  // Selection the operator explicitly waved past the validation nudge. Keyed by
+  // signature so picking a different fleet asks again, but bouncing between
+  // steps with the same fleet doesn't.
+  const [skipValidateSig, setSkipValidateSig] = useState<string | null>(null)
   const authAbort = useRef<AbortController | null>(null)
 
   // True when the current selection already has (finished) validation results.
@@ -343,23 +369,7 @@ function App() {
 
   async function onTestConnection() {
     setAuthError(null)
-    let testPw: string | undefined
-    if (isTest) {
-      // Always re-prompt so a wrong password can be corrected and re-tried.
-      const pw = await prompt({
-        title: 'Test host password',
-        message: `Password for ${testHost ?? 'the test host'} (used for the connection test):`,
-        password: true,
-        confirmLabel: 'Test',
-      })
-      if (pw === null) return
-      if (!pw) {
-        setAuthError('Password is required.')
-        return
-      }
-      testPw = pw
-      setTestPassword(pw) // remember the verified password for the run
-    } else if (selectedHosts(source).length === 0) {
+    if (selectedHosts(source).length === 0) {
       setAuthError('Select at least one system first.')
       return
     }
@@ -376,10 +386,9 @@ function App() {
     try {
       const form = buildDeployForm({
         action: 'quick_diag', // ignored by /api/auth-check; just needs the source
-        runMode: isTest ? 'test' : 'universal',
+        runMode: 'universal',
         config,
         source,
-        testPassword: testPw,
       })
       // Null-guarded updaters: if the operator closes the modal mid-stream
       // (authResults → null), late events are ignored instead of re-opening it.
@@ -417,25 +426,6 @@ function App() {
     }
   }
 
-  // Let the operator correct a mistyped Test-host password from the Action step.
-  async function reenterTestPassword() {
-    const pw = await prompt({
-      title: 'Test host password',
-      message: `Re-enter the password for ${testHost ?? 'the test host'}:`,
-      password: true,
-      confirmLabel: 'Save',
-    })
-    if (pw === null) return
-    if (!pw) {
-      setRunError('Password is required.')
-      return
-    }
-    setTestPassword(pw)
-    // Update the remembered run so "Retry failed hosts" replays with the new password.
-    if (lastRunRef.current) lastRunRef.current.pw = pw
-    setRunError(null)
-  }
-
   function toggleTheme() {
     setTheme((t) => (t === 'night' ? 'day' : 'night'))
     const now = Date.now()
@@ -449,22 +439,6 @@ function App() {
     }
   }
 
-  async function ensureTestPassword(): Promise<string | null> {
-    if (testPassword) return testPassword
-    const pw = await prompt({
-      title: 'Test host password',
-      message: `Password for ${testHost ?? 'the test host'}:`,
-      password: true,
-      confirmLabel: 'Run',
-    })
-    if (pw === null) return null
-    if (!pw) {
-      setRunError('Password is required.')
-      return null
-    }
-    setTestPassword(pw)
-    return pw
-  }
 
   /** Pick one of the shortlisted systems (Step 1). Returns its label or null. */
   async function chooseHost(message: string, confirmLabel = 'Run'): Promise<string | null> {
@@ -477,15 +451,8 @@ function App() {
     return prompt({ title: 'Choose a system', message, options: hosts, confirmLabel })
   }
 
-  async function startRun(
-    runMode: RunMode,
-    srcOverride?: SourceState,
-    testPw?: string,
-    opOverride?: ThreecxOperation,
-    actionOverride?: ActionId,
-    tcxConfigOverride?: object,
-    append?: boolean,
-  ) {
+  async function startRun(runMode: RunMode, opts: RunOptions = {}) {
+    const { src: srcOverride, op: opOverride, act: actionOverride, tcxConfig: tcxConfigOverride } = opts
     setRunError(null)
     const src = srcOverride ?? source
     const act = actionOverride ?? action
@@ -521,7 +488,6 @@ function App() {
         runMode,
         config,
         source: src,
-        testPassword: testPw,
         fallbackHosts: run.failedLabels,
         customScript: act === 'custom_script' ? resolveCustomScript(customScript) ?? undefined : undefined,
         threecxConfig:
@@ -529,12 +495,19 @@ function App() {
             ? (tcxConfigOverride ??
               buildThreecxConfig(opOverride ? { ...threecx, operation: opOverride } : threecx, src.mode === 'compound'))
             : undefined,
+        rebootSystems: act === 'apt_upgrade' ? (opts.reboot ?? rebootSystems) : false,
       })
       // Remember this run so "Retry failed hosts" replays exactly what we did.
       if (runMode !== 'fallback') {
-        lastRunRef.current = { src, pw: testPw, op: act === 'threecx' ? op : undefined, act, tcxConfig: tcxConfigOverride }
+        lastRunRef.current = {
+          src,
+          op: act === 'threecx' ? op : undefined,
+          act,
+          tcxConfig: tcxConfigOverride,
+          rebootSystems: act === 'apt_upgrade' ? (opts.reboot ?? rebootSystems) : undefined,
+        }
       }
-      void run.start(form, { append })
+      void run.start(form, { append: opts.append })
       setStep('results') // jump to the Voyage Results stage on run
     } catch (e) {
       setRunError(e instanceof Error ? e.message : String(e))
@@ -553,9 +526,9 @@ function App() {
     setRunError(null)
     const act = actionOverride ?? action
     if (actionOverride && actionOverride !== action) setAction(actionOverride)
-    const assessment = assessRisk(act, threecx, customScript)
-    const canBatch = !isTest && hostCount > 1
-    // Read-only actions on a single host (or a Test run) run straight away.
+    const assessment = assessRisk(act, threecx, customScript, rebootSystems)
+    const canBatch = hostCount > 1
+    // Read-only actions on a single host run straight away.
     // With multiple hosts we still show the modal so the operator can choose
     // to batch the rollout, even for read-only actions.
     if (assessment.level === 'read-only' && !canBatch) {
@@ -563,25 +536,20 @@ function App() {
       return
     }
     setBatchOn(false)
-    setApproval({ assessment, systems: isTest ? 1 : hostCount, canBatch, act: actionOverride })
+    setApproval({ assessment, systems: hostCount, canBatch, act: actionOverride })
   }
 
   // Execute the current action: all selected hosts at once, or in batches of N.
   async function execute(size: number, act?: ActionId) {
     setApproval(null)
     setBatchQueue(null)
-    if (isTest) {
-      const pw = await ensureTestPassword()
-      if (pw === null) return
-      return startRun('test', source, pw, undefined, act)
-    }
     if (size > 0) {
       const labels = selectedHosts(source).map((h) => h.value)
       const batches = chunk(labels, size)
       setBatchQueue({ batches, idx: 0, act })
-      return startRun('universal', restrictToHosts(source, batches[0]), undefined, undefined, act)
+      return startRun('universal', { src: restrictToHosts(source, batches[0]), act })
     }
-    startRun('universal', undefined, undefined, undefined, act)
+    startRun('universal', { act })
   }
 
   function continueBatch() {
@@ -593,26 +561,27 @@ function App() {
       return
     }
     setBatchQueue({ ...bq, idx })
-    void startRun('universal', restrictToHosts(source, bq.batches[idx]), undefined, undefined, bq.act, undefined, true)
+    void startRun('universal', { src: restrictToHosts(source, bq.batches[idx]), act: bq.act, append: true })
   }
 
   // 3CX "Probe for all available fields" — runs probe on ONE chosen system.
   async function onProbe() {
     setRunError(null)
-    if (isTest) {
-      const pw = await ensureTestPassword()
-      if (pw === null) return
-      return startRun('test', source, pw, 'probe')
-    }
     const chosen = await chooseHost('Choose a system to probe for all available fields:', 'Probe')
     if (chosen === null) return
-    startRun('universal', restrictToHost(source, chosen), undefined, 'probe')
+    startRun('universal', { src: restrictToHost(source, chosen), op: 'probe' })
   }
 
   function onFallback() {
     const lr = lastRunRef.current
     if (!lr) return void startRun('fallback')
-    void startRun('fallback', lr.src, lr.pw, lr.op, lr.act, lr.tcxConfig)
+    void startRun('fallback', {
+      src: lr.src,
+      op: lr.op,
+      act: lr.act,
+      tcxConfig: lr.tcxConfig,
+      reboot: lr.rebootSystems,
+    })
   }
 
   // 3CX Quick Action (Copy BLFs / CID / Audio Cleanup): builds an apply config
@@ -622,11 +591,6 @@ function App() {
     if (act.needsSource && !sourceExt.trim()) return setRunError('Source extension is required.')
     if (!targets.trim()) return setRunError('Target extensions are required.')
     const cfg = buildQuickActionConfig(threecx, act, sourceExt, targets, source.mode === 'compound')
-    if (isTest) {
-      const pw = await ensureTestPassword()
-      if (pw === null) return
-      return startRun('test', source, pw, undefined, undefined, cfg)
-    }
     const hosts = selectedHosts(source)
     if (hosts.length > 1) {
       const ok = await prompt({
@@ -637,7 +601,7 @@ function App() {
       })
       if (ok === null) return
     }
-    startRun('universal', undefined, undefined, undefined, undefined, cfg)
+    startRun('universal', { tcxConfig: cfg })
   }
 
   // Quick Actions have their own per-card buttons; hide the shared Run button.
@@ -787,7 +751,17 @@ function App() {
               runHidden={runHidden}
               onRun={onRun}
               onStop={() => run.cancel()}
-              customScriptSlot={<CustomScriptPanel value={customScript} onChange={setCustomScript} variables={availableVars} csvAvailable={source.mode === 'compound'} />}
+              rebootSystems={rebootSystems}
+              setRebootSystems={setRebootSystems}
+              customScriptSlot={
+                <CustomScriptPanel
+                  value={customScript}
+                  onChange={setCustomScript}
+                  variables={availableVars}
+                  columns={csvColumns}
+                  csvAvailable={source.mode === 'compound'}
+                />
+              }
               threecxSlot={
                 <ThreecxPanel
                   value={threecx}
@@ -812,7 +786,6 @@ function App() {
             <ResultsPanel
               run={run}
               onFallback={onFallback}
-              onReenterPassword={isTest ? () => void reenterTestPassword() : undefined}
               onStop={() => run.cancel()}
               titles={resultTitles}
               exitCategories={exitCategories}
@@ -928,7 +901,7 @@ function App() {
               </>
             ) : null}
             <div className="confirm__actions">
-              {!isTest && !authChecking && authResults && authResults.results.some((r) => !r.ok) && (
+              {!authChecking && authResults && authResults.results.some((r) => !r.ok) && (
                 <button
                   type="button"
                   className="run__btn"

@@ -13,6 +13,14 @@ export function Splash({ ready }: { ready: boolean }) {
   const [phase, setPhase] = useState<'show' | 'fading' | 'done'>('show')
   const [minElapsed, setMinElapsed] = useState(false)
 
+  // This component is now on screen, so index.html's static boot screen (shown
+  // while the bundle was still loading) has done its job. Removed from here
+  // rather than from main.tsx because an effect fires on commit even while the
+  // window is still hidden — requestAnimationFrame doesn't.
+  useEffect(() => {
+    document.getElementById('boot')?.remove()
+  }, [])
+
   useEffect(() => {
     const t = setTimeout(() => setMinElapsed(true), MIN_MS)
     return () => clearTimeout(t)

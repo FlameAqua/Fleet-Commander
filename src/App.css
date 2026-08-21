@@ -188,7 +188,7 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .step {
+  :root:not([data-motion='full']) .step {
     animation: none;
   }
 }
