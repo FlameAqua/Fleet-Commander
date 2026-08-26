@@ -11,15 +11,6 @@ const { autoUpdater } = electronUpdater
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
-// Read-only GitHub token used to read releases from the PRIVATE repo. CI writes
-// this file from a secret at build time; it's gitignored and absent in dev.
-let UPDATE_TOKEN = ''
-try {
-  UPDATE_TOKEN = fs.readFileSync(path.join(__dirname, 'update-token.txt'), 'utf8').trim()
-} catch {
-  UPDATE_TOKEN = ''
-}
-
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
@@ -315,25 +306,14 @@ function setupAutoUpdate () {
   autoUpdater.autoDownload = true
   autoUpdater.autoInstallOnAppQuit = true
   // Stable channel: resolve updates through GitHub's /releases/latest, which
-  // excludes pre-releases. Setting this true instead makes the private-repo
-  // provider pick `candidates.find(it => it.prerelease)` — i.e. the newest
-  // PRE-RELEASE, ignoring newer stable ones — so a 1.0.0 release would never be
-  // offered while any beta tag is still flagged as a pre-release on GitHub.
+  // excludes pre-releases: the public GitHub provider resolves the stable
+  // channel through `/releases/latest`, unauthenticated and not subject to the
+  // API rate limit. Setting this true instead reads the releases feed and
+  // prefers pre-release tags.
   autoUpdater.allowPrerelease = false
-  // Authenticate to the private repo so the updater can read releases/assets.
-  if (UPDATE_TOKEN) {
-    try {
-      autoUpdater.setFeedURL({
-        provider: 'github',
-        owner: 'FlameAqua',
-        repo: 'Fleet-Commander',
-        private: true,
-        token: UPDATE_TOKEN,
-      })
-    } catch (err) {
-      console.error('[update] setFeedURL failed:', err)
-    }
-  }
+  // No setFeedURL and no token: the repository is public, so electron-builder's
+  // generated app-update.yml (from `build.publish` in package.json) is all the
+  // updater needs. Nothing secret ships inside the app.
   autoUpdater.on('checking-for-update', () => sendUpdate({ state: 'checking' }))
   autoUpdater.on('update-available', (i) => sendUpdate({ state: 'available', version: i?.version }))
   autoUpdater.on('update-not-available', () => sendUpdate({ state: 'none' }))

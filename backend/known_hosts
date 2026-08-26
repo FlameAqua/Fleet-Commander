@@ -1,0 +1,8 @@
+# Fleet Commander seeds this file into the per-user data directory on first
+# run (see bsm_paths.seed_file_once). It is intentionally EMPTY in the repo:
+# host keys accumulate on the operator's machine via trust-on-first-use, and
+# a populated copy here would publish an inventory of real hostnames.
+#
+# Do not commit a populated known_hosts. The live file lives at:
+#   Windows: %APPDATA%/Batch System Manager/known_hosts
+#   Linux:   ~/.local/share/Batch System Manager/known_hosts

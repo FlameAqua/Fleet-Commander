@@ -34,13 +34,11 @@ What it *does* defend against:
 These are accepted trade-offs. Don't "fix" them without understanding why they
 are the way they are.
 
-- **The auto-update token ships inside the app.** For a private repo, the
-  updater needs a credential to read releases, so CI writes
-  `electron/update-token.txt` into the packaged app. Anyone with an installed
-  copy can extract it. Keep it a **fine-grained, read-only** token scoped to
-  that one repository, and rotate it when someone leaves.
-  *If the repository is public, delete the token mechanism entirely* — public
-  releases need no authentication.
+- **Auto-update ships no credential.** The repository is public, so the updater
+  resolves releases through `https://github.com/<owner>/<repo>/releases/latest`
+  unauthenticated. Nothing secret is embedded in the packaged app. If this ever
+  moves back to a private repo, note that the token would have to ship inside
+  the build and would be extractable by anyone with an install.
 - **`/api/delete-csv-file` can delete any `.csv` on the machine.** It refuses
   directories, non-`.csv` files and `.enc` files, and only the renderer calls
   it (after an encrypt-on-import). Given the local-only trust boundary this is
@@ -76,7 +74,9 @@ The repository must stay free of anything site-specific:
 
   The sandbox target is also settable in-app under Settings → Sandbox target.
 
-`electron/update-token.txt` is gitignored and written only by CI.
+The auto-update token mechanism was removed when the repository went public;
+`electron/update-token.txt` stays gitignored so a leftover copy on an older
+dev machine can't be committed by accident.
 
 ## Rules for security-relevant changes
 

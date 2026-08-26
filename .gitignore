@@ -1,4 +1,6 @@
-# Embedded auto-update token (written by CI from a secret; never commit)
+# Legacy: the auto-update token is gone (the repo is public, so the updater
+# needs no credential). Kept ignored so a leftover file on an old dev machine
+# can't be committed by accident.
 electron/update-token.txt
 
 # Logs
