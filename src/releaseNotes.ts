@@ -2,7 +2,7 @@ export const GITHUB_URL = 'https://github.com/FlameAqua/Fleet-Commander'
 
 /** Fallback version shown in Settings when the Electron bridge isn't present
  *  (dev/browser). In the packaged app the real app.getVersion() is used. */
-export const APP_VERSION = '1.0.0'
+export const APP_VERSION = '1.0.2'
 
 export interface ReleaseNote {
   version: string
@@ -12,6 +12,16 @@ export interface ReleaseNote {
 
 /** Newest first. Shown in the Settings → Release notes section. */
 export const RELEASE_NOTES: ReleaseNote[] = [
+  {
+    version: '1.0.2',
+    date: '2026-08-26',
+    notes: [
+      'Fleet Commander now runs as a single instance — launching it again focuses the window that is already open instead of starting a second copy.',
+      'Buttons, tabs and input fields react as you use them: hover lift, press feedback, and a clear accent ring when focused.',
+      'The "Import CSV" tab is now "Import File", with separate "Import CSV" and "Import KeePass" buttons.',
+      'Ships can be clicked to sink them again — the step column was covering the water, so only the very edges of the window worked.',
+    ],
+  },
   {
     version: '1.0.0',
     date: '2026-08-21',

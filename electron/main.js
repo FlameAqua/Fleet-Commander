@@ -346,7 +346,33 @@ function setupAutoUpdate () {
 // ---------------------------------------------------------------------------
 // Lifecycle
 // ---------------------------------------------------------------------------
+
+/**
+ * Only one copy of the installed app may run. A second instance would spawn a
+ * rival Flask sidecar fighting over port 8765, run its own auto-updater, and
+ * let the operator start two fleet-wide runs that know nothing about each
+ * other. Launching again just focuses the window that's already open.
+ *
+ * Packaged builds only: the lock is keyed on userData, which dev shares with
+ * the installed app — so locking in dev would mean an installed Fleet Commander
+ * silently blocks `npm run dev` (and vice versa).
+ */
+const gotInstanceLock = isDev || app.requestSingleInstanceLock()
+if (!gotInstanceLock) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    if (!mainWindow.isVisible()) mainWindow.show()
+    mainWindow.focus()
+  })
+}
+
 app.whenReady().then(async () => {
+  // Lost the race for the single-instance lock: quit without touching the
+  // backend — the instance that holds it owns port 8765.
+  if (!gotInstanceLock) return
   // No application menu (File/Edit/View/Window) — this is a focused tool UI.
   Menu.setApplicationMenu(null)
   // In dev the backend is started by `npm run dev` (the `dev:backend` process),

@@ -193,6 +193,11 @@ def test_password_var_for_test_and_manual():
     print("\n[$Password exposed for Test Host / Manual]")
     c = flask_app.app.test_client()
     calls, restore = _capture_deploy_host()
+    # The sandbox target is site config and ships blank, so pin a
+    # placeholder: this test is about $Password reaching the script, not
+    # about which host it runs on.
+    real_test_host = deployer.TEST_HOST
+    deployer.TEST_HOST = "ssh://root@sandbox.example"
     try:
         # --- Test Host: password is typed by the operator, no CSV exists.
         r = c.post("/api/deploy", data={
@@ -225,6 +230,7 @@ def test_password_var_for_test_and_manual():
         check((calls[0].get("host_vars") or {}).get("Password") == "manualpw",
               "manual host gets $Password from its row")
     finally:
+        deployer.TEST_HOST = real_test_host
         restore()
 
 

@@ -40,10 +40,21 @@ import bsm_paths
 
 GITHUB_API_RELEASES = "https://api.github.com/repos/sipcapture/heplify/releases"
 KNOWN_GOOD_FALLBACK = "2.0.21"          # last-resort version baked into remote script
-TEST_HOST = "ssh://root@lab-pbx.example"  # the single safe test target
+# Site-specific defaults. Deliberately blank in the repo so no one's
+# infrastructure is published with the source; set them per machine via the
+# environment, or in the app (Settings -> Sandbox target, and the HEP server
+# field on the heplify action).
+#
+#   BSM_TEST_HOST=ssh://root@lab-pbx.internal
+#   BSM_HEP_SERVER=10.0.0.10:9060
 
-DEFAULT_INTERFACE = "ens18"
-DEFAULT_HEP_SERVER = "10.0.0.10:9060"
+# A safe single target to try an action against. "" = none configured.
+TEST_HOST = os.environ.get("BSM_TEST_HOST", "").strip()
+
+DEFAULT_INTERFACE = os.environ.get("BSM_CAPTURE_IFACE", "ens18").strip()
+# host:port of the HEP collector heplify ships to. Blank until configured —
+# the action validates the format and fails with a clear message.
+DEFAULT_HEP_SERVER = os.environ.get("BSM_HEP_SERVER", "").strip()
 DEFAULT_CAPTURE_MODE = "SIPRTCP"
 DEFAULT_DISCARD_METHODS = "OPTIONS,NOTIFY,REGISTER"
 

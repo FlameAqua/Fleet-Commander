@@ -235,8 +235,14 @@
   border-color: var(--accent);
   color: #fff;
 }
+/* Restate the accent background: `.scripts button:hover` is more specific
+   than `.scripts button.scripts__create`, so without this the primary
+   action turns grey the moment you point at it. */
 .scripts button.scripts__create:hover:not(:disabled) {
+  background: var(--accent);
+  border-color: var(--accent);
   filter: brightness(1.1);
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 45%, transparent);
 }
 .scripts__hint {
   margin: 0;

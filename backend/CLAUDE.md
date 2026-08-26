@@ -1,5 +1,8 @@
 # Batch Device System Manager — Developer / Maintenance Guide
 
+> Scope: this file covers the **Flask backend**. For the Electron shell, the
+> React renderer and the repo-wide conventions, read `../CLAUDE.md` first.
+
 This file is the cold-start brief for Claude (and any human picking up the
 codebase). It captures **what the app does, why it's structured this way,
 where to find things, and the non-obvious gotchas** that took real time to
@@ -241,8 +244,8 @@ The PBX password is sourced via `password_source`:
 - `"ssh"`    — **frontend sentinel only**. The backend in `app.py` rewrites
                this to `"csv"` + column `"Password"` and mirrors each host's
                SSH credential into `host_vars_by_label[label]["Password"]`.
-               This is what makes **Test Host / Manual** modes work with a
-               single password prompt — same SSH and PBX credential.
+               This is what makes the **Manual / Paste** sources work with a
+               single password per host — same SSH and PBX credential.
 
 ### 5.2 Entity model
 
@@ -708,8 +711,9 @@ Reserves the right edge so the filter input stops short of the button.
 1. Read `README.md` for the user perspective. Five minutes.
 2. Run the app: `run.bat` (Windows) / `./run.sh` (Linux). Open
    http://127.0.0.1:8765.
-3. Use the Test Host mode against a non-production PBX to see the flow
-   end-to-end without touching the fleet.
+3. Point the sandbox target (Settings -> Sandbox target, or `BSM_TEST_HOST`)
+   at a non-production PBX to see the flow end-to-end without touching the
+   fleet.
 4. To trace a request: form submit → `app.deploy()` → `generate()` →
    `deploy_host` → SSH. Single file each step.
 5. To trace a 3CX entity: find it in `TCX_ENDPOINTS` (frontend) and in

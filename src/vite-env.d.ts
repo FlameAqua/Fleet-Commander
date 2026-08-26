@@ -18,8 +18,6 @@ type UpdateStatus =
   | { state: 'error'; message?: string }
 
 interface FleetElectronBridge {
-  send: (channel: string, data?: unknown) => void
-  on: (channel: string, func: (...args: unknown[]) => void) => void
   backendUrl: string
   windowControl?: (action: 'minimize' | 'maximize' | 'close') => void
   /** Open a URL in the user's default browser (Electron shell.openExternal). */

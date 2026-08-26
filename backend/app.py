@@ -852,12 +852,36 @@ def get_help():
     return (text, 200, {"Content-Type": "text/markdown; charset=utf-8"})
 
 
+# Locked-down CSP for the packaged app, where Flask serves the built SPA and
+# every asset is local. Applied only when _SPA_DIR is set: in development the
+# page comes from the Vite dev server, whose HMR client needs inline/eval that
+# this policy forbids.
+#
+#   style-src allows 'unsafe-inline' because CodeMirror injects <style> at
+#   runtime and React writes inline styles; script-src does NOT, so injected
+#   markup still cannot execute.
+_CSP = (
+    "default-src 'self'; "
+    "script-src 'self'; "
+    "style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data:; "
+    "font-src 'self'; "
+    "connect-src 'self'; "
+    "object-src 'none'; "
+    "base-uri 'none'; "
+    "form-action 'none'; "
+    "frame-ancestors 'none'"
+)
+
+
 @app.after_request
 def _security_headers(resp):
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["X-Frame-Options"] = "DENY"
     resp.headers["Referrer-Policy"] = "no-referrer"
     resp.headers["Cache-Control"] = "no-store"
+    if _SPA_DIR:
+        resp.headers["Content-Security-Policy"] = _CSP
     return resp
 
 
@@ -1344,8 +1368,17 @@ def _resolve_targets_creds(mode):
     have_keepass = bool(kp_file and kp_file.filename)
 
     if mode == "test":
+        # The sandbox target is site-specific and blank by default (see
+        # deployer.TEST_HOST) — say so plainly rather than failing on an empty
+        # SSH URL.
+        configured = _configured_test_host()
+        if not configured:
+            return [], {}, [], (
+                "No sandbox target configured. Set one in Settings -> Sandbox "
+                "target, or via the BSM_TEST_HOST environment variable."
+            )
         try:
-            test_target = deployer.parse_ssh_url(deployer.TEST_HOST)
+            test_target = deployer.parse_ssh_url(configured)
         except ValueError as e:
             return [], {}, [], f"bad test host: {e}"
         targets = [test_target]

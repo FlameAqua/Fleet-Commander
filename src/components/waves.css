@@ -5,7 +5,12 @@
   bottom: 0;
   height: 90px;
   pointer-events: none;
-  z-index: 0;
+  /* Above the step column, which spans the full height of the scroll area
+     and would otherwise swallow every click aimed at a ship. The layer
+     itself is click-through — only .ship opts back in — and it stays below
+     the title bar (50) and modals, so nothing else changes. Content keeps
+     clear of the ships via .app__main's 110px bottom padding. */
+  z-index: 5;
   overflow: hidden;
 }
 .waves__svg {

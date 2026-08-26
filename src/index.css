@@ -77,6 +77,121 @@ button:disabled {
   cursor: default;
 }
 
+/* ---------------------------------------------------------------------------
+   Interaction polish
+   One place for how things feel when you touch them, so every button, field
+   and tab across the app reacts the same way instead of each component
+   inventing its own. Components keep their own colours; this only adds the
+   motion, the lift and the focus ring on top.
+   --------------------------------------------------------------------------- */
+
+button,
+select,
+input,
+textarea,
+.src-filebtn,
+.src-link,
+[role='tab'] {
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease,
+    box-shadow 160ms ease,
+    filter 140ms ease,
+    transform 110ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Lift on hover, press in on click. Excludes the frameless window controls and
+   the editor's own chrome, where a moving target would feel wrong. */
+button:enabled:hover:not(.wc__btn):not(.cm-button):not([name]),
+.src-filebtn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 3px 10px rgba(15, 30, 70, 0.13);
+}
+button:enabled:active:not(.wc__btn):not(.cm-button):not([name]),
+.src-filebtn:active {
+  transform: translateY(1px) scale(0.985);
+  box-shadow: none;
+}
+
+/* Primary actions get a tinted glow rather than a grey one. */
+.run__btn--primary:enabled:hover,
+.prompt__btn--primary:hover {
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.run__btn--danger:enabled:hover {
+  box-shadow: 0 4px 14px rgba(192, 57, 43, 0.4);
+}
+
+/* Keyboard focus is a first-class state: a clear accent ring everywhere. */
+:root button:focus-visible,
+:root select:focus-visible,
+:root input:focus-visible,
+:root textarea:focus-visible,
+:root [role='tab']:focus-visible,
+:root .src-filebtn:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Fields: hint on hover, commit to the accent on focus.
+   The `:root` prefix is load-bearing — component rules (`.src-manualrow input`
+   and friends) are more specific than a bare `input:focus` and would otherwise
+   keep their resting border. */
+:root input:not([type='checkbox']):not([type='radio']):not([type='file']):hover:not(:disabled),
+:root select:hover:not(:disabled),
+:root textarea:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+}
+:root input:not([type='checkbox']):not([type='radio']):not([type='file']):focus,
+:root select:focus,
+:root textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+/* Checkboxes and radios: accent-tinted, and they nudge when you point at one. */
+input[type='checkbox'],
+input[type='radio'] {
+  accent-color: var(--accent);
+}
+label:hover > input[type='checkbox']:not(:disabled),
+label:hover > input[type='radio']:not(:disabled) {
+  transform: scale(1.12);
+}
+
+/* Tabs slide up a touch as they take over. */
+[role='tab'] {
+  will-change: transform;
+}
+:root [role='tab'].is-active {
+  transform: translateY(-1px);
+}
+
+button:disabled,
+input:disabled,
+select:disabled,
+textarea:disabled {
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+/* Honour the OS reduced-motion request (Windows sets it for RDP), unless the
+   operator has explicitly opted back in via Settings. Colour changes stay —
+   it's the movement that's the problem. */
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-motion='full']) button,
+  :root:not([data-motion='full']) select,
+  :root:not([data-motion='full']) input,
+  :root:not([data-motion='full']) textarea,
+  :root:not([data-motion='full']) .src-filebtn,
+  :root:not([data-motion='full']) [role='tab'] {
+    transition-property: background-color, border-color, color, box-shadow;
+    transform: none !important;
+  }
+}
+
 html {
   /* The app owns its own scrolling (.app__scroll); the document itself never
      scrolls, so a stray tall element can't resurrect a full-height window
