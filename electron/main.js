@@ -163,6 +163,28 @@ function waitForBackend (timeoutMs = 30000) {
   })
 }
 
+/** Resolve once `url` returns a response (any status), or after `timeoutMs`. */
+function waitForUrl (url, timeoutMs = 300000) {
+  const deadline = Date.now() + timeoutMs
+  return new Promise((resolve) => {
+    const ping = () => {
+      const req = http.get(url, (res) => {
+        res.resume()
+        resolve(true)
+      })
+      req.on('error', () => {
+        if (Date.now() > deadline) resolve(false)
+        else setTimeout(ping, 400)
+      })
+      req.setTimeout(600000, () => {
+        req.destroy()
+        resolve(false)
+      })
+    }
+    ping()
+  })
+}
+
 // ---------------------------------------------------------------------------
 // Window
 // ---------------------------------------------------------------------------
@@ -192,7 +214,18 @@ function createWindow () {
   //   dev  → the Vite dev server (HMR)
   //   prod → the Flask-served SPA (waitForBackend has confirmed it's up)
   const startUrl = isDev ? VITE_DEV_SERVER_URL : BACKEND_URL
-  mainWindow.loadURL(startUrl)
+  if (isDev) {
+    // Vite listens long before it can serve: the first request waits on the
+    // dependency pre-bundle and the initial transform, which is tens of seconds
+    // on a cold cache. Paint a local boot screen immediately and swap to the
+    // dev server once it genuinely answers, so the window is never blank.
+    mainWindow.loadFile(path.join(__dirname, 'boot.html'))
+    void waitForUrl(startUrl).then(() => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.loadURL(startUrl)
+    })
+  } else {
+    mainWindow.loadURL(startUrl)
+  }
   // Detached DevTools costs ~3s of dev startup — FC_DEVTOOLS=0 skips it.
   if (isDev && process.env.FC_DEVTOOLS !== '0') mainWindow.webContents.openDevTools({ mode: 'detach' })
 
@@ -281,7 +314,12 @@ function setupAutoUpdate () {
   updaterWired = true
   autoUpdater.autoDownload = true
   autoUpdater.autoInstallOnAppQuit = true
-  autoUpdater.allowPrerelease = true // we ship beta tags (e.g. v1.0.0-beta.2)
+  // Stable channel: resolve updates through GitHub's /releases/latest, which
+  // excludes pre-releases. Setting this true instead makes the private-repo
+  // provider pick `candidates.find(it => it.prerelease)` — i.e. the newest
+  // PRE-RELEASE, ignoring newer stable ones — so a 1.0.0 release would never be
+  // offered while any beta tag is still flagged as a pre-release on GitHub.
+  autoUpdater.allowPrerelease = false
   // Authenticate to the private repo so the updater can read releases/assets.
   if (UPDATE_TOKEN) {
     try {

@@ -34,7 +34,7 @@ import {
 import './source.css'
 
 const MODES: { id: SourceMode; label: string }[] = [
-  { id: 'compound', label: 'Import CSV' },
+  { id: 'compound', label: 'Import File' },
   { id: 'manual', label: 'Input Manually' },
   { id: 'paste', label: 'Paste List' },
 ]
@@ -292,7 +292,7 @@ function CompoundEditor({
             </option>
           ))}
         </select>
-        <label className="src-filebtn">
+        <label className="src-filebtn" title="Import a .csv, or an encrypted .enc from your CSV folder">
           {/* clear on click so re-picking the SAME file (e.g. after a wrong
               decrypt password) still fires onChange */}
           <input
@@ -303,7 +303,7 @@ function CompoundEditor({
             }}
             onChange={(e) => void onFile(e.target.files?.[0] ?? null)}
           />
-          Import your own…
+          Import CSV
         </label>
         <label className="src-filebtn" title="Read hosts straight out of a KeePass vault">
           <input
@@ -314,7 +314,7 @@ function CompoundEditor({
             }}
             onChange={(e) => void onKdbx(e.target.files?.[0] ?? null)}
           />
-          🔑 KeePass…
+          🔑 Import KeePass
         </label>
         <span className="src-filename">
           {source.file ? source.file.name : 'No file selected'}
@@ -657,7 +657,7 @@ function ManualEditor({
     })
     if (ok === null) return
     downloadBlob(new Blob([text], { type: 'text/csv' }), exportName('csv'))
-    toast('Exported. Re-import it from the "Import CSV" tab.', 'ok')
+    toast('Exported. Re-import it from the "Import File" tab.', 'ok')
   }
 
   /** Encrypt straight into the CSV folder — shows up in the import dropdown. */

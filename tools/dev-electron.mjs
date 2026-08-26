@@ -75,7 +75,13 @@ const child = spawn(electronPath, ['.'], {
   env: { ...process.env, VITE_DEV_SERVER_URL: DEV_URL },
 })
 
-child.on('exit', (code) => process.exit(code ?? 0))
+child.on('exit', (code, signal) => {
+  // Worth stating plainly: when the app window is closed, Electron exits and
+  // `concurrently -k` tears down vite/flask too. That is the stack shutting
+  // down normally, not a crash.
+  console.log(`[launcher] electron exited code=${code} signal=${signal}`)
+  process.exit(code ?? 0)
+})
 const stop = () => {
   try {
     child.kill()

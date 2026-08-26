@@ -78,6 +78,10 @@ button:disabled {
 }
 
 html {
+  /* The app owns its own scrolling (.app__scroll); the document itself never
+     scrolls, so a stray tall element can't resurrect a full-height window
+     scrollbar overlapping the title bar. */
+  overflow: hidden;
   /* Thin scrollbar so the window's content reaches the right edge (no reserved
      gutter/"padding"), and so the small layout shift when the scrollbar appears
      on a tall stage is barely perceptible. */
@@ -105,7 +109,9 @@ body {
 }
 
 #root {
-  min-height: 100svh;
+  /* Exactly one viewport tall (not `min-height`) so .app can clamp and hand
+     scrolling to .app__scroll, which starts below the title bar. */
+  height: 100svh;
   display: flex;
   flex-direction: column;
 }

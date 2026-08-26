@@ -23,6 +23,20 @@ export default defineConfig({
     port: 5173,
     // Fail loudly instead of hopping to a random port — Electron waits on 5173.
     strictPort: true,
+    watch: {
+      // Vite watches the project root and only skips node_modules/.git by
+      // default. Here that means crawling backend/.venv (~9k files), the
+      // PyInstaller output in backend/dist (~1.7k) and the packaged
+      // installers in release-builds/ — hundreds of MB that can never affect
+      // the renderer, and which make dev startup crawl on Windows.
+      ignored: [
+        '**/backend/**',
+        '**/release-builds/**',
+        '**/dist/**',
+        '**/sbom/**',
+        '**/.claude/**',
+      ],
+    },
     proxy: {
       '/api': {
         target: BACKEND,

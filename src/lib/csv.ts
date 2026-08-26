@@ -405,7 +405,7 @@ export function filterPastedText(
 
 /**
  * Render manual rows as a canonical KeePass-format CSV, so a fleet typed by
- * hand can be saved and later re-imported through "Import CSV". The output uses
+ * hand can be saved and later re-imported through "Import File". The output uses
  * CANONICAL_HEADER, which resolveCompoundColumns() maps back onto url/login/
  * password without the operator touching Column mapping.
  *

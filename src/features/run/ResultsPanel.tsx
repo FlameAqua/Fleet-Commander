@@ -346,7 +346,10 @@ export function ResultsPanel({ run, onFallback, onStop, titles = {}, exitCategor
           <button
             type="button"
             className="run__btn"
-            onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+            // The page scrolls inside .app__scroll, not the window.
+            onClick={(e) =>
+              e.currentTarget.closest('.app__scroll')?.scrollTo({ top: 0, behavior: 'smooth' })
+            }
           >
             ↑ Back to top
           </button>

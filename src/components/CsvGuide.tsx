@@ -55,7 +55,7 @@ Edge-02,root,s3cret,ssh://root@10.0.0.6,`}</pre>
                   KeePass writes a CSV with <code>Account, Login Name, Password, Web Site, Comments</code> headers which is supported by default.
                 </li>
                 <li>
-                  In Fleet Commander, select  <b>Import CSV → Import your own... </b>
+                  In Fleet Commander, select  <b>Import File → Import CSV </b>
                 </li>
               </ol>
 

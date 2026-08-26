@@ -689,6 +689,9 @@ function App() {
         </div>
       </header>
 
+      {/* Scrolls independently of the title bar, so the scrollbar starts
+          below it instead of running the full window height. */}
+      <div className="app__scroll">
       <main className="app__main">
         <nav className="roadmap" aria-label="Progress">
           {STAGES.map((s, i) => {
@@ -810,6 +813,7 @@ function App() {
           </section>
         )}
       </main>
+      </div>
 
       <Settings
         open={settingsOpen}

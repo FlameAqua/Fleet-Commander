@@ -118,14 +118,15 @@ const themeExt = EditorView.theme({
     fontSize: '0.8rem',
     // Drives the gap between the find and replace rows (block flow, so the
     // line box is what separates them).
-    lineHeight: '2.9',
+    lineHeight: '2.6',
   },
   '.cm-panel.cm-search .cm-textfield': {
     font: 'inherit',
+    lineHeight: '1.4',
     verticalAlign: 'middle',
-    margin: '0 0.6rem 0 0',
-    padding: '0.4rem 0.65rem',
-    minWidth: '200px',
+    margin: '0 0.5rem 0 0',
+    padding: '0.26rem 0.5rem',
+    width: '150px',
     border: '1px solid var(--border)',
     borderRadius: '6px',
     backgroundColor: 'var(--bg)',
@@ -137,9 +138,10 @@ const themeExt = EditorView.theme({
   },
   '.cm-panel.cm-search button[name]': {
     font: 'inherit',
+    lineHeight: '1.4',
     verticalAlign: 'middle',
-    margin: '0 0.45rem 0 0',
-    padding: '0.34rem 0.85rem',
+    margin: '0 0.35rem 0 0',
+    padding: '0.22rem 0.62rem',
     border: '1px solid var(--border)',
     borderRadius: '999px',
     backgroundColor: 'rgba(127, 127, 127, 0.12)',
@@ -152,6 +154,7 @@ const themeExt = EditorView.theme({
     color: 'var(--text-h)',
   },
   '.cm-panel.cm-search label': {
+    lineHeight: '1.4',
     verticalAlign: 'middle',
     margin: '0 0.85rem 0 0.25rem',
     color: 'var(--muted)',

@@ -2,14 +2,29 @@
   display: flex;
   flex-direction: column;
   flex: 1;
-  min-height: 100svh;
+  /* Bounded height with the content scrolling inside .app__scroll — otherwise
+     the window scrollbar runs the full height and cuts through the custom
+     title bar. The height comes from #root (see index.css); `flex: 1` would
+     override a `height` set here, so min-height:0 is what makes it clamp. */
+  min-height: 0;
+  overflow: hidden;
   position: relative;
   z-index: 1; /* above the fixed waves; transparent areas let them show through */
 }
 
+/* The scrolling region: everything below the title bar. Full width, so the
+   scrollbar still sits at the window's right edge. */
+.app__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
 .app__bar {
-  position: sticky;
-  top: 0;
+  flex: none;
   z-index: 50; /* stays above the scrolling step cards (below modals) */
   display: flex;
   align-items: center;
