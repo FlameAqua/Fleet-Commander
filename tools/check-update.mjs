@@ -13,7 +13,7 @@
 // Optional: set GH_TOKEN to raise the unauthenticated API rate limit. It is
 // NOT required, and the app never uses one.
 const OWNER = 'FlameAqua'
-const REPO = 'Fleet-Commander-App'
+const REPO = 'Fleet-Commander'
 
 const headers = {
   'User-Agent': 'fleet-commander-update-check',
