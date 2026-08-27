@@ -1,0 +1,19 @@
+# Diagnostic only — delete once Actions is confirmed healthy.
+#
+# Does the smallest possible thing on the cheapest runner. If this never appears
+# in the Actions tab either, the problem is the repository's Actions service
+# (support ticket / fresh repo), not release.yml.
+name: canary
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Say hello
+        run: echo "Actions is alive. ref=$GITHUB_REF sha=$GITHUB_SHA"
