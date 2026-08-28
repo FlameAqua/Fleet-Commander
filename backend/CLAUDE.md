@@ -63,19 +63,27 @@ deployer.py               Everything that actually runs against a remote host:
                               import, trunk-id remapping — lives inside the
                               raw-string bash template in build_threecx_script.
 
-templates/index.html      The entire UI. Single file, vanilla JS. ~3800 lines.
-                          Hosts: HTML, CSS, all JS (no bundler).
-                          Tab structure: Source (CSV/KeePass/Test/Manual)
-                            + Action (Deploy / Custom / 3CX / Apt / Diag).
+bsm_paths.py              Data-dir resolution (%APPDATA% / XDG), settings.json,
+                          first-run seeding of scripts/ and known_hosts.
+
+templates/index.html      LEGACY. The original single-file vanilla-JS UI, kept
+                          only so a standalone backend run (no BSM_SPA_DIR)
+                          still serves something. The real UI is the React SPA
+                          in ../src/ — do not develop against this file.
 
 static/                   Just the favicon/logo.
-scripts/                  Operator-saved custom scripts (managed via
-                          /api/scripts CRUD endpoints).
+scripts/                  Sample operator scripts, seeded into the data dir on
+                          first run. The live library lives in the data dir and
+                          is managed via the /api/scripts CRUD endpoints.
+tests/test_api.py         The backend suite (`npm test`). Plain asserts.
 
 README.md                 User-facing manual. Don't put dev notes here.
 CLAUDE.md                 This file.
-run.bat / run.sh          Launchers.
 ```
+
+The app is launched with `npm run dev` from the repo root, which starts this
+backend, Vite and Electron together. There are no `run.bat` / `run.sh`
+launchers any more.
 
 ---
 
@@ -84,7 +92,7 @@ run.bat / run.sh          Launchers.
 ### High level
 
 ```
-Browser (index.html)
+Renderer (src/, React — see ../CLAUDE.md "The run lifecycle")
   │ POST multipart/form-data → /api/deploy
   │   • mode      (universal | test | fallback)
   │   • action    (deploy | apt_upgrade | custom_script | quick_diag | threecx)
@@ -116,14 +124,29 @@ Per-host log_callback (in app.py _run closure)
   ▼
 Flask generator drains the queue → NDJSON over stream_with_context
   ▼
-Browser handleEvent
-  │ • "meta"   → header count
-  │ • "start"  → create host card (dot=run, msg="queued…")
-  │ • "log"    → scheduleLogFlush(pre, line) — batched via rAF
-  │ • "result" → set dot ok/fail, overwrite pre.textContent with ev.output,
-  │              call maybeOfferThreecxExport (strips base64, offers download)
-  │ • "summary"→ Fallback button enables for failed hosts
+Renderer: src/lib/stream.ts → src/features/run/useDeployRun.ts
+  │ • "meta"   → header counts
+  │ • "start"  → create the host card (status "queued")
+  │ • "log"    → buffered, flushed once per animation frame
+  │ • "result" → status ok/fail, replace the card body with ev.output,
+  │              extractExport() strips the base64 block and offers a download
+  │ • "summary"→ "Retry failed hosts" enables
 ```
+
+**Note on this section and everything below it that names the frontend.** This
+guide predates the React rewrite. Where it says `index.html`,
+`scheduleLogFlush`, `maybeOfferThreecxExport`, `tcxState` or `handleEvent`, the
+behaviour is unchanged but the code now lives in `src/` — the mapping is:
+
+| Old (vanilla `templates/index.html`) | Now |
+|---|---|
+| `handleEvent` | `src/features/run/useDeployRun.ts` |
+| `scheduleLogFlush` | the rAF batcher in the same hook |
+| `maybeOfferThreecxExport` | `src/features/threecx/exportChip.ts` |
+| `tcxState` | `src/features/threecx/threecxModel.ts` |
+| `TCX_ENDPOINTS`, `TCX_EXTRA_CATALOGS`, `TCX_ENUMS`, `GOLDEN_STANDARD_PRESET` | `src/features/threecx/catalogs.ts` |
+
+Everything about `app.py` and `deployer.py` in this file is current.
 
 ### Key invariant: Compound CSV columns become `$variables`
 
@@ -647,22 +670,22 @@ Reserves the right edge so the filter input stops short of the button.
 | Singleton detection                 | `if "value" in resp` in export loop           |
 | Streaming endpoint                  | `app.deploy()` → `generate()`                 |
 | 413 diagnostics                     | `app.request_entity_too_large`                |
-| Frontend tab state                  | `tcxState` object near `const tcxState =`     |
-| Per-entity catalogs                 | `TCX_EXTRA_CATALOGS`                          |
-| Endpoint registry                   | `TCX_ENDPOINTS`                               |
-| Golden Standard preset              | `GOLDEN_STANDARD_PRESET`, `GOLDEN_PARAMETERS_FILTER` |
-| Real-time log batcher               | `scheduleLogFlush` in `index.html`            |
-| Export download chip                | `maybeOfferThreecxExport`                     |
-| Import modal & strategy             | `#tcx-import-modal`, `askThreecxImportStrategy` |
+| Frontend 3CX state                  | `src/features/threecx/threecxModel.ts`        |
+| Per-entity catalogs                 | `TCX_EXTRA_CATALOGS` in `src/features/threecx/catalogs.ts` |
+| Endpoint registry                   | `TCX_ENDPOINTS` in the same file              |
+| Golden Standard preset              | `GOLDEN_STANDARD_PRESET`, `GOLDEN_PARAMETERS_FILTER` (same file) |
+| Real-time log batcher               | `src/features/run/useDeployRun.ts`            |
+| Export download chip                | `src/features/threecx/exportChip.ts`          |
+| Import modal & strategy             | `src/features/threecx/ThreecxPanel.tsx`, confirmed in `App.startRun` |
+| Risk classification / approval      | `src/features/run/riskAssessment.ts`          |
 
 ---
 
 ## 10. Conventions / style
 
-- **No bundler.** `templates/index.html` is one file with inline `<style>`
-  and `<script>`. Don't introduce a build step unless the file becomes
-  truly unmanageable.
-- **Vanilla JS only.** No React, no jQuery, no frameworks.
+- **The UI is React + Vite, in `../src/`.** (This rule used to say "no bundler,
+  vanilla JS only" — that was true of `templates/index.html`, which is now
+  legacy. See `../CLAUDE.md`.)
 - **No external HTTP clients in scripts.** The 3CX template uses
   `urllib` (stdlib) because curl/wget availability varies across the
   fleet.
@@ -708,9 +731,11 @@ Reserves the right edge so the filter input stops short of the button.
 
 ## 12. Quick checklist when picking this up cold
 
-1. Read `README.md` for the user perspective. Five minutes.
-2. Run the app: `run.bat` (Windows) / `./run.sh` (Linux). Open
-   http://127.0.0.1:8765.
+1. Read `../CLAUDE.md` for the whole system, then `README.md` for the user
+   perspective. Fifteen minutes.
+2. Run the app from the repo root: `npm run dev` (Flask + Vite + Electron).
+   The renderer is also reachable in a normal browser at
+   http://127.0.0.1:5173, which is far easier to inspect.
 3. Point the sandbox target (Settings -> Sandbox target, or `BSM_TEST_HOST`)
    at a non-production PBX to see the flow end-to-end without touching the
    fleet.
